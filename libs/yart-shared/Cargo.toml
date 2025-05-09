@@ -1,0 +1,17 @@
+[package]
+name = "yart-shared"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "yart_shared"
+
+[dependencies]
+anyhow = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }

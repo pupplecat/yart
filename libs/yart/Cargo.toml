@@ -1,0 +1,11 @@
+[package]
+name = "yart"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "yart"
+
+[dependencies]
+yart-macro = { workspace = true }
+yart-shared = { workspace = true }
