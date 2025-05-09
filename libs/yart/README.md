@@ -2,6 +2,8 @@
 
 YART (Yet Another Rig Tool) is a Rust library for creating tools with the `rig::tool::Tool` trait, providing a convenient procedural macro (`#[rig_tool]`) to generate tool implementations with JSON schema support. It re-exports the `#[rig_tool]` macro from `yart_macro` and shared types/utilities from `yart_shared`, offering a unified API for the `rig` framework.
 
+- Example Project: [github.com/pupplecatg/yart-example](https://github.com/pupplecatg/yart-example)
+
 ## Purpose
 
 The `yart` crate is the primary entry point for using YART. It simplifies integration by combining the procedural macro and shared utilities into a single dependency, enabling developers to define async tools with minimal boilerplate.
