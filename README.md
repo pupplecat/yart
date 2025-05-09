@@ -6,8 +6,8 @@ YART is a Rust library suite for creating tools with the `rig::tool::Tool` trait
 
 YART is split into three crates to adhere to Rust’s proc-macro restrictions and provide a clean API:
 
-- **`yart_shared`**: Contains shared types (`ToolError`, `ToolOutput`) and utilities (`derive_parameters`) used by generated code and consumers.
-- **`yart_macro`**: A proc-macro crate exporting the `#[rig_tool]` macro, which generates `rig::tool::Tool` implementations.
+- **`yart-shared`**: Contains shared types (`ToolError`, `ToolOutput`) and utilities (`derive_parameters`) used by generated code and consumers.
+- **`yart-macro`**: A proc-macro crate exporting the `#[rig_tool]` macro, which generates `rig::tool::Tool` implementations.
 - **`yart`**: A wrapper crate that re-exports the `#[rig_tool]` macro from `yart_macro` and types/functions from `yart_shared`, offering a unified interface.
 
 This structure mirrors conventions like `serde`/`serde_derive`, ensuring compatibility and modularity.
@@ -25,21 +25,12 @@ This structure mirrors conventions like `serde`/`serde_derive`, ensuring compati
 
 ## Installation
 
-Clone the YART repository and add the crates to your project’s `Cargo.toml`:
-
 ```toml
 [dependencies]
-yart = { path = "../yart/yart" }
+yart = "0.1.1"
 ```
 
-Alternatively, if published to crates.io, use:
-
-```toml
-[dependencies]
-yart = "0.1.0"
-```
-
-The `yart` crate depends on `yart_shared` and `yart_macro`, so you only need to include `yart`.
+The `yart` crate depends on `yart-shared` and `yart-macro`, so you only need to include `yart`.
 
 ## Usage
 
@@ -110,16 +101,18 @@ async fn main() {
 
 ```text
 yart/
-├── yart/              # Wrapper crate
-│   ├── src/lib.rs     # Re-exports yart_macro and yart_shared
-│   └── Cargo.toml
-├── yart_macro/        # Proc-macro crate
-│   ├── src/lib.rs     # Defines #[rig_tool] macro
-│   └── Cargo.toml
-├── yart_shared/       # Shared types and utilities
-│   ├── src/lib.rs     # Defines ToolError, ToolOutput, derive_parameters
-│   └── Cargo.toml
-└── README.md
+├── libs/
+│   ├── yart/              # Wrapper crate
+│   │   ├── src/lib.rs     # Re-exports yart-macro and yart-shared
+│   │   └── Cargo.toml
+│   ├── yart-macro/        # Proc-macro crate
+│   │   ├── src/lib.rs     # Defines #[rig_tool] macro
+│   │   └── Cargo.toml
+│   └── yart-shared/       # Shared types and utilities
+│       ├── src/lib.rs     # Defines ToolError, ToolOutput, derive_parameters
+│       └── Cargo.toml
+├── README.md
+└── Cargo.toml
 ```
 
 ## Testing
@@ -127,23 +120,23 @@ yart/
 Run tests for each crate:
 
 ```bash
-# Test yart_shared
-cd yart/yart_shared
+# Test yart-shared
+cd libs/yart-shared
 cargo test
 
-# Test yart_macro
-cd yart/yart_macro
+# Test yart-macro
+cd libs/yart-macro
 cargo test
 
 # Test yart (integration tests)
-cd yart/yart
+cd libs/yart
 cargo test
 ```
 
 ## Limitations
 
 - The `description` attribute is required; enforced at compile-time but tested manually due to proc-macro testing constraints.
-- Consider using `trybuild` for robust macro testing in `yart_macro`.
+- Consider using `trybuild` for robust macro testing in `yart-macro`.
 
 ## Contributing
 
