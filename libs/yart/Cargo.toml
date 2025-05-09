@@ -1,7 +1,10 @@
 [package]
 name = "yart"
-version = "0.1.0"
-edition = "2021"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+description = "YART: A wrapper crate re-exporting the rig_tool macro and shared utilities for rig::tool::Tool"
+repository = { workspace = true }
 
 [lib]
 name = "yart"

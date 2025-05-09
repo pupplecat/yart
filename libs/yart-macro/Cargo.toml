@@ -1,7 +1,10 @@
 [package]
 name = "yart-macro"
-version = "0.1.0"
-edition = "2021"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+description = "YART Macro: A proc-macro crate providing the #[rig_tool] macro for rig::tool::Tool"
+repository = { workspace = true }
 
 [lib]
 proc-macro = true
