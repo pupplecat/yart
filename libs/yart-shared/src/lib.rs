@@ -3,7 +3,7 @@ use schemars::{schema_for, JsonSchema};
 use serde::{Deserialize, Serialize};
 use serde_json::{to_value, Value};
 use std::future::Future;
-use tokio::sync::mpsc;
+use tokio::{spawn, sync::mpsc};
 
 pub async fn wrap_unsafe<F, Fut, T>(f: F) -> Result<T>
 where
@@ -13,7 +13,7 @@ where
 {
     let (tx, mut rx) = mpsc::channel(1);
 
-    tokio::spawn(async move {
+    spawn(async move {
         let result = f().await;
         let _ = tx.send(result).await;
     });
