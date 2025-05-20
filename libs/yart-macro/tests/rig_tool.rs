@@ -66,14 +66,30 @@ async fn without_context(args: TestArgs) -> anyhow::Result<TestOutput, ToolError
 // Test function with #[rig_tool]
 #[yart::rig_tool(description = "A test tool that echoes input with context")]
 async fn without_name(
-    ctx: Arc<TestContext>,
+    bbb: Arc<TestContext>,
     args: TestArgs,
 ) -> anyhow::Result<TestOutput, ToolError> {
     if args.input.is_empty() {
         return Err(ToolError::new("Input cannot be empty"));
     }
     Ok(TestOutput {
-        result: format!("{}: {}", ctx.value, args.input),
+        result: format!("{}: {}", bbb.value, args.input),
+    })
+}
+
+// Test function with #[rig_tool]
+#[yart::rig_tool(description = "A test tool without parameter")]
+async fn without_parameter() -> anyhow::Result<TestOutput, ToolError> {
+    Ok(TestOutput {
+        result: format!("no_parameter"),
+    })
+}
+
+// Test function with #[rig_tool]
+#[yart::rig_tool(description = "A test tool with only context", context_arg = true)]
+async fn with_only_context(ctx: Arc<TestContext>) -> anyhow::Result<TestOutput, ToolError> {
+    Ok(TestOutput {
+        result: format!("Echo: {}", ctx.value),
     })
 }
 
@@ -403,6 +419,27 @@ fn test_rig_tool_missing_description() {
         true,
         "Macro requires description, verified by manual compilation failure"
     );
+}
+
+#[tokio::test]
+async fn test_rig_without_parameter() {
+    let tool = WithoutParameter::new();
+
+    let result = tool.call(()).await.unwrap();
+    let output: TestOutput = serde_json::from_value(result.result).unwrap();
+    assert_eq!(output.result, "no_parameter");
+}
+
+#[tokio::test]
+async fn test_rig_with_only_context() {
+    let ctx = Arc::new(TestContext {
+        value: "context value".to_string(),
+    });
+    let tool = WithOnlyContext::new(ctx);
+
+    let result = tool.call(()).await.unwrap();
+    let output: TestOutput = serde_json::from_value(result.result).unwrap();
+    assert_eq!(output.result, "Echo: context value");
 }
 
 #[test]

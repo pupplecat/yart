@@ -1,0 +1,15 @@
+# Changelog
+
+## [0.1.2] - 2025-05-21
+
+### Fixed
+
+- Resolved compilation error for context-only functions (`fn name(ctx)`) by correctly generating the `new` method to accept a context parameter, fixing the "expected 0 arguments, found 1" error.
+- Fixed parameter name mismatch in `internal_call` by using original parameter names from the function signature, resolving "cannot find value `ctx`" errors.
+- Ensured the `call` method always takes an `args: Self::Args` parameter to match the `rig::tool::Tool` trait, fixing the "method `call` has 1 parameter but the declaration in trait has 2" error for no-argument functions.
+- Added support for arbitrary context parameter names (e.g., `client: Arc<>`) by avoiding hardcoded `ctx` in generated code.
+
+### Changed
+
+- Added `context_arg` attribute to explicitly distinguish context vs. args for single-argument functions, improving clarity and flexibility.
+- Improved error handling to support `anyhow::Result` return types with consistent error conversion to `yart::ToolError`.
