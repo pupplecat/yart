@@ -11,4 +11,4 @@ name = "yart"
 
 [dependencies]
 yart-macro = { workspace = true }
-yart-shared = { workspace = true }
+yart-shared = { workspace = true, features = ["schema", "async"] }

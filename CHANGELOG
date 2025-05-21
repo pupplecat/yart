@@ -1,15 +1,18 @@
-# Changelog
-
 ## [0.1.2] - 2025-05-21
+
+### Added
+
+- New `yart::mcp_tool` macro for generating `mcp-core` `ToolHandler` implementations, supporting context initialization and JSON schema generation.
+- Shared logic in `yart-macro/src/common.rs` for input parsing and return type validation.
+- `yart-shared/src/common.rs` with utilities like `to_upper_camel_case` and schema generation.
 
 ### Fixed
 
-- Resolved compilation error for context-only functions (`fn name(ctx)`) by correctly generating the `new` method to accept a context parameter, fixing the "expected 0 arguments, found 1" error.
-- Fixed parameter name mismatch in `internal_call` by using original parameter names from the function signature, resolving "cannot find value `ctx`" errors.
-- Ensured the `call` method always takes an `args: Self::Args` parameter to match the `rig::tool::Tool` trait, fixing the "method `call` has 1 parameter but the declaration in trait has 2" error for no-argument functions.
-- Added support for arbitrary context parameter names (e.g., `client: Arc<>`) by avoiding hardcoded `ctx` in generated code.
+- Resolved compilation errors in `rig_tool` for context-only and no-arg functions.
+- Fixed parameter name mismatch in `rig_tool` by using original parameter names.
 
 ### Changed
 
-- Added `context_arg` attribute to explicitly distinguish context vs. args for single-argument functions, improving clarity and flexibility.
-- Improved error handling to support `anyhow::Result` return types with consistent error conversion to `yart::ToolError`.
+- Refactored `yart-macro` to use `rig_tool.rs` and `mcp_tool.rs` with reexports in `lib.rs`.
+- Moved `wrap_unsafe` to `yart-shared::async_utils` with an `async` feature.
+- Updated `mcp_tool` to generate `mcp_core::ToolHandler` with `ToolHandlerFn`.

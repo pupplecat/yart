@@ -46,6 +46,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-trait"
+version = "0.1.88"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e539d3fca749fcee5236ab05e93a52867dd549cc157c8cb7f99595f3cedffdb5"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -639,6 +650,23 @@ name = "log"
 version = "0.4.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13dc2df351e3202783a1fe0d44375f7295ffb4049267b0f3018346dc122a1d94"
+
+[[package]]
+name = "mcp-core"
+version = "0.1.50"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a76673446eba2d1011f0dbc3b8668984f8b1ca2754b05b9c2bcd27d02ad73aa3"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures",
+ "libc",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "url",
+]
 
 [[package]]
 name = "memchr"
@@ -1437,6 +1465,7 @@ dependencies = [
  "form_urlencoded",
  "idna",
  "percent-encoding",
+ "serde",
 ]
 
 [[package]]
@@ -1778,6 +1807,7 @@ name = "yart-macro"
 version = "0.1.2"
 dependencies = [
  "anyhow",
+ "mcp-core",
  "proc-macro2",
  "quote",
  "rig-core",
@@ -1787,6 +1817,7 @@ dependencies = [
  "syn",
  "tokio",
  "yart",
+ "yart-shared",
 ]
 
 [[package]]
@@ -1794,9 +1825,12 @@ name = "yart-shared"
 version = "0.1.2"
 dependencies = [
  "anyhow",
+ "proc-macro2",
+ "quote",
  "schemars",
  "serde",
  "serde_json",
+ "syn",
  "tokio",
 ]
 
