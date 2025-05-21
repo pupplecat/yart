@@ -1,33 +1,25 @@
-pub mod common;
-pub use common::*;
+use std::future::Future;
 
 pub use anyhow::{anyhow, Result};
 use schemars::{schema_for, JsonSchema};
 use serde::{Deserialize, Serialize};
 use serde_json::{to_value, Value};
+use tokio::{spawn, sync::mpsc};
 
-#[cfg(feature = "async")]
-pub mod async_utils {
-    use std::future::Future;
+pub async fn wrap_unsafe<F, Fut, T>(f: F) -> Result<T>
+where
+    F: FnOnce() -> Fut + Send + 'static,
+    Fut: Future<Output = anyhow::Result<T>> + Send + 'static,
+    T: Send + 'static,
+{
+    let (tx, mut rx) = mpsc::channel(1);
 
-    use super::*;
-    use tokio::{spawn, sync::mpsc};
+    spawn(async move {
+        let result = f().await;
+        let _ = tx.send(result).await;
+    });
 
-    pub async fn wrap_unsafe<F, Fut, T>(f: F) -> Result<T>
-    where
-        F: FnOnce() -> Fut + Send + 'static,
-        Fut: Future<Output = anyhow::Result<T>> + Send + 'static,
-        T: Send + 'static,
-    {
-        let (tx, mut rx) = mpsc::channel(1);
-
-        spawn(async move {
-            let result = f().await;
-            let _ = tx.send(result).await;
-        });
-
-        rx.recv().await.ok_or_else(|| anyhow!("Channel closed"))?
-    }
+    rx.recv().await.ok_or_else(|| anyhow!("Channel closed"))?
 }
 
 #[derive(Debug)]

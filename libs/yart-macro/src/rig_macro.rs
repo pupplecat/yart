@@ -2,25 +2,14 @@ extern crate proc_macro;
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::parse::{Parse, ParseStream};
-use syn::punctuated::Punctuated;
 use syn::{
-    parse_macro_input, parse_quote, Expr, ExprLit, FnArg, ItemFn, Lit, Meta, ReturnType, Token,
-    Type,
+    parse::{Parse, ParseStream},
+    parse_macro_input, parse_quote,
+    punctuated::Punctuated,
+    Expr, ExprLit, FnArg, ItemFn, Lit, Meta, ReturnType, Token, Type,
 };
 
-// Convert snake_case to UpperCamelCase
-fn to_upper_camel_case(s: &str) -> String {
-    s.split('_')
-        .map(|part| {
-            let mut chars = part.chars();
-            match chars.next() {
-                None => String::new(),
-                Some(first) => first.to_uppercase().to_string() + chars.as_str(),
-            }
-        })
-        .collect()
-}
+use crate::common::to_upper_camel_case;
 
 struct MacroArgs {
     description: String,
@@ -76,7 +65,6 @@ impl Parse for MacroArgs {
     }
 }
 
-#[proc_macro_attribute]
 pub fn rig_tool(attr: TokenStream, item: TokenStream) -> TokenStream {
     let args = parse_macro_input!(attr as MacroArgs);
     let item = parse_macro_input!(item as ItemFn);

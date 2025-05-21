@@ -26,4 +26,3 @@ schemars = { workspace = true }
 anyhow = { workspace = true }
 
 yart = { workspace = true }
-yart-shared = {workspace = true, features = ["schema", "async"]}

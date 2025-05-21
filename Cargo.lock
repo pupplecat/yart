@@ -1817,7 +1817,6 @@ dependencies = [
  "syn",
  "tokio",
  "yart",
- "yart-shared",
 ]
 
 [[package]]
