@@ -372,12 +372,84 @@ pub fn mcp_tool(args: TokenStream, input_fn: TokenStream) -> TokenStream {
 
     let return_type = extract_return_type(&input_fn);
 
-    let call_signature = match context.is_some() {
-        true => quote! {#ctx_ident: #ctx_ty},
-        false => quote! {},
+    // Generate parameters struct for schema if args_ty is not ()
+    let params_struct_name = format_ident!("{}Parameters", struct_name);
+    let params_struct_def = if args_ty != parse_quote! { () } {
+        quote! {
+            #[derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema, Default)]
+            pub struct #params_struct_name {
+                #args_ident: #args_ty
+            }
+        }
+    } else {
+        quote! {}
+    };
+
+    let (call_signature, ctx_clone) = match context.is_some() {
+        true => (
+            quote! {#ctx_ident: #ctx_ty},
+            quote! {let #ctx_ident = #ctx_ident.clone();},
+        ),
+        false => (quote! {}, quote! {}),
+    };
+
+    // Generate call invocation based on parameters
+    let call_args = match (ctx_ident.is_some(), args_ident.is_some()) {
+        (true, true) => {
+            let ctx_ident = ctx_ident.as_ref().unwrap();
+            let args_ident = args_ident.as_ref().unwrap();
+            quote! {
+                let params: #params_struct_name = match serde_json::from_value(params) {
+                    Ok(p) => p,
+                    Err(e) => return mcp_core::types::CallToolResponse {
+                        content: vec![mcp_core::types::ToolResponseContent::Text(
+                            mcp_core::types::TextContent {
+                                content_type: "text".to_string(),
+                                text: format!("Invalid parameters: {}", e),
+                                annotations: None,
+                            }
+                        )],
+                        is_error: Some(true),
+                        meta: req.meta,
+                    },
+                };
+                #fn_name(#ctx_ident, params.#args_ident).await
+            }
+        }
+        (true, false) => {
+            let ctx_ident = ctx_ident.as_ref().unwrap();
+            quote! {
+                #fn_name(#ctx_ident).await
+            }
+        }
+        (false, true) => {
+            let args_ident = args_ident.as_ref().unwrap();
+            quote! {
+                let params: #params_struct_name = match serde_json::from_value(params) {
+                    Ok(p) => p,
+                    Err(e) => return mcp_core::types::CallToolResponse {
+                        content: vec![mcp_core::types::ToolResponseContent::Text(
+                            mcp_core::types::TextContent {
+                                content_type: "text".to_string(),
+                                text: format!("Invalid parameters: {}", e),
+                                annotations: None,
+                            }
+                        )],
+                        is_error: Some(true),
+                        meta: req.meta,
+                    },
+                };
+                #fn_name(params.#args_ident).await
+            }
+        }
+        (false, false) => quote! {
+            #fn_name().await
+        },
     };
 
     let expanded = quote! {
+
+        #params_struct_def
 
         #input_fn
 
@@ -411,8 +483,56 @@ pub fn mcp_tool(args: TokenStream, input_fn: TokenStream) -> TokenStream {
             }
 
             pub fn call(#call_signature) -> mcp_core::tools::ToolHandlerFn {
-                   move |req: mcp_core::types::CallToolRequest| {
-                   }
+                #ctx_clone
+                move |req: mcp_core::types::CallToolRequest| {
+                    Box::pin(async move {
+                        let params = match req.arguments {
+                            Some(args) => serde_json::to_value(args).unwrap_or_default(),
+                            None => serde_json::Value::Null,
+                        };
+
+                        let call_response =
+                            yart::wrap_unsafe(move || async move {
+                                #call_args
+                                .map_err(|e| anyhow::anyhow!(e.to_string()))
+                            }).await?;
+
+                       let call_tool_response  = match call_response {
+                            Ok::<#return_type, _>(response) => {
+                                let content = vec![response.into()];
+                                mcp_core::types::CallToolResponse {
+                                    content,
+                                    is_error: Some(false),
+                                    meta: req.meta,
+                                }
+                            }
+                            Err(e) => mcp_core::types::CallToolResponse {
+                                content: vec![mcp_core::types::ToolResponseContent::Text(
+                                    mcp_core::types::TextContent {
+                                        content_type: "text".to_string(),
+                                        text: format!("Tool execution error: {}", e),
+                                        annotations: None,
+                                    }
+                                )],
+                                is_error: Some(true),
+                                meta: req.meta,
+                            },
+                        };
+                        call_tool_response;
+
+                    mcp_core::types::CallToolResponse {
+                        content: vec![mcp_core::types::ToolResponseContent::Text(
+                            mcp_core::types::TextContent {
+                                content_type: "text".to_string(),
+                                text: format!("Tool execution error: "),
+                                annotations: None,
+                            }
+                        )],
+                        is_error: Some(true),
+                        meta: req.meta,
+                    }
+                    })
+                }
             }
         }
     };
