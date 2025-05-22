@@ -1,51 +1,56 @@
-extern crate proc_macro;
-
-use proc_macro::TokenStream;
-use quote::quote;
+use convert_case::{Case, Casing};
+use proc_macro2::TokenStream;
+use quote::{format_ident, quote, ToTokens};
 use syn::{
     parse::{Parse, ParseStream},
-    parse_macro_input, parse_quote,
+    parse_quote,
     punctuated::Punctuated,
-    Expr, ExprLit, FnArg, ItemFn, Lit, Meta, Pat, PatType, ReturnType, Token, Type,
+    Expr, ExprLit, FnArg, Item, ItemFn, Lit, Meta, Pat, PatType, ReturnType, Token, Type,
 };
 
-use crate::common::to_upper_camel_case;
-
-struct MacroArgs {
-    description: String,
+#[derive(Debug)]
+struct ToolArgs {
     name: Option<String>,
+    description: Option<String>,
     context_arg: bool,
+    annotations: ToolAnnotations,
+}
+
+#[derive(Debug)]
+struct ToolAnnotations {
+    title: Option<String>,
     read_only_hint: Option<bool>,
     destructive_hint: Option<bool>,
     idempotent_hint: Option<bool>,
     open_world_hint: Option<bool>,
 }
 
-impl Parse for MacroArgs {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let mut description = None;
-        let mut name = None;
-        let mut context_arg = false;
-        let mut read_only_hint = None;
-        let mut destructive_hint = None;
-        let mut idempotent_hint = None;
-        let mut open_world_hint = None;
+impl Default for ToolAnnotations {
+    fn default() -> Self {
+        Self {
+            title: None,
+            read_only_hint: None,
+            destructive_hint: None,
+            idempotent_hint: None,
+            open_world_hint: None,
+        }
+    }
+}
 
-        if !input.is_empty() {
-            let meta_list: Punctuated<Meta, Token![,]> = Punctuated::parse_terminated(input)?;
-            for meta in meta_list {
-                if let Meta::NameValue(nv) = meta {
+impl Parse for ToolArgs {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut name = None;
+        let mut description = None;
+        let mut context_arg = false;
+        let mut annotations = ToolAnnotations::default();
+
+        let meta_list: Punctuated<Meta, Token![,]> = Punctuated::parse_terminated(input)?;
+
+        for meta in meta_list {
+            match meta {
+                Meta::NameValue(nv) => {
                     let ident = nv.path.get_ident().unwrap().to_string();
                     match ident.as_str() {
-                        "description" => {
-                            if let Expr::Lit(ExprLit {
-                                lit: Lit::Str(lit_str),
-                                ..
-                            }) = nv.value
-                            {
-                                description = Some(lit_str.value());
-                            }
-                        }
                         "name" => {
                             if let Expr::Lit(ExprLit {
                                 lit: Lit::Str(lit_str),
@@ -53,6 +58,25 @@ impl Parse for MacroArgs {
                             }) = nv.value
                             {
                                 name = Some(lit_str.value());
+                            } else {
+                                return Err(syn::Error::new_spanned(
+                                    nv.value,
+                                    "Expected string literal",
+                                ));
+                            }
+                        }
+                        "description" => {
+                            if let Expr::Lit(ExprLit {
+                                lit: Lit::Str(lit_str),
+                                ..
+                            }) = nv.value
+                            {
+                                description = Some(lit_str.value());
+                            } else {
+                                return Err(syn::Error::new_spanned(
+                                    nv.value,
+                                    "Expected string literal",
+                                ));
                             }
                         }
                         "context_arg" => {
@@ -61,85 +85,184 @@ impl Parse for MacroArgs {
                                 ..
                             }) = nv.value
                             {
-                                context_arg = lit_bool.value();
+                                context_arg = lit_bool.value;
+                            } else {
+                                return Err(syn::Error::new_spanned(
+                                    nv.value,
+                                    "Expected boolean literal",
+                                ));
                             }
                         }
-                        "read_only_hint" => {
+                        "read_only_hint" | "readOnlyHint" => {
                             if let Expr::Lit(ExprLit {
                                 lit: Lit::Bool(lit_bool),
                                 ..
                             }) = nv.value
                             {
-                                read_only_hint = Some(lit_bool.value());
+                                annotations.read_only_hint = Some(lit_bool.value);
+                            } else {
+                                return Err(syn::Error::new_spanned(
+                                    nv.value,
+                                    "Expected boolean literal",
+                                ));
                             }
                         }
-                        "destructive_hint" => {
+                        "destructive_hint" | "destructiveHint" => {
                             if let Expr::Lit(ExprLit {
                                 lit: Lit::Bool(lit_bool),
                                 ..
                             }) = nv.value
                             {
-                                destructive_hint = Some(lit_bool.value());
+                                annotations.destructive_hint = Some(lit_bool.value);
+                            } else {
+                                return Err(syn::Error::new_spanned(
+                                    nv.value,
+                                    "Expected boolean literal",
+                                ));
                             }
                         }
-                        "idempotent_hint" => {
+                        "idempotent_hint" | "idempotentHint" => {
                             if let Expr::Lit(ExprLit {
                                 lit: Lit::Bool(lit_bool),
                                 ..
                             }) = nv.value
                             {
-                                idempotent_hint = Some(lit_bool.value());
+                                annotations.idempotent_hint = Some(lit_bool.value);
+                            } else {
+                                return Err(syn::Error::new_spanned(
+                                    nv.value,
+                                    "Expected boolean literal",
+                                ));
                             }
                         }
-                        "open_world_hint" => {
+                        "open_world_hint" | "openWorldHint" => {
                             if let Expr::Lit(ExprLit {
                                 lit: Lit::Bool(lit_bool),
                                 ..
                             }) = nv.value
                             {
-                                open_world_hint = Some(lit_bool.value());
+                                annotations.open_world_hint = Some(lit_bool.value);
+                            } else {
+                                return Err(syn::Error::new_spanned(
+                                    nv.value,
+                                    "Expected boolean literal",
+                                ));
                             }
                         }
-                        _ => {}
+                        _ => {
+                            return Err(syn::Error::new_spanned(
+                                nv.path,
+                                format!("Unknown attribute: {}", ident),
+                            ));
+                        }
                     }
+                }
+                Meta::List(list) if list.path.is_ident("annotations") => {
+                    let nested: Punctuated<Meta, Token![,]> =
+                        list.parse_args_with(Punctuated::parse_terminated)?;
+
+                    for meta in nested {
+                        if let Meta::NameValue(nv) = meta {
+                            let key = nv.path.get_ident().unwrap().to_string();
+
+                            if let Expr::Lit(ExprLit {
+                                lit: Lit::Str(lit_str),
+                                ..
+                            }) = nv.value
+                            {
+                                if key == "title" {
+                                    annotations.title = Some(lit_str.value());
+                                } else {
+                                    return Err(syn::Error::new_spanned(
+                                        nv.path,
+                                        format!("Unknown string annotation: {}", key),
+                                    ));
+                                }
+                            } else if let Expr::Lit(ExprLit {
+                                lit: Lit::Bool(lit_bool),
+                                ..
+                            }) = nv.value
+                            {
+                                match key.as_str() {
+                                    "read_only_hint" | "readOnlyHint" => {
+                                        annotations.read_only_hint = Some(lit_bool.value)
+                                    }
+                                    "destructive_hint" | "destructiveHint" => {
+                                        annotations.destructive_hint = Some(lit_bool.value)
+                                    }
+                                    "idempotent_hint" | "idempotentHint" => {
+                                        annotations.idempotent_hint = Some(lit_bool.value)
+                                    }
+                                    "open_world_hint" | "openWorldHint" => {
+                                        annotations.open_world_hint = Some(lit_bool.value)
+                                    }
+                                    _ => {
+                                        return Err(syn::Error::new_spanned(
+                                            nv.path,
+                                            format!("Unknown boolean annotation: {}", key),
+                                        ));
+                                    }
+                                }
+                            } else {
+                                return Err(syn::Error::new_spanned(
+                                    nv.value,
+                                    "Expected string or boolean literal for annotation value",
+                                ));
+                            }
+                        } else {
+                            return Err(syn::Error::new_spanned(
+                                meta,
+                                "Expected name-value pair for annotation",
+                            ));
+                        }
+                    }
+                }
+                _ => {
+                    return Err(syn::Error::new_spanned(
+                        meta,
+                        "Expected name-value pair or list",
+                    ));
                 }
             }
         }
 
-        Ok(MacroArgs {
-            description: description.expect("rig_tool/mcp_tool requires a description attribute"),
+        Ok(ToolArgs {
             name,
+            description,
             context_arg,
-            read_only_hint,
-            destructive_hint,
-            idempotent_hint,
-            open_world_hint,
+            annotations,
         })
     }
 }
 
-pub fn parse_inputs(
-    inputs: &Punctuated<FnArg, Token![,]>,
+fn extract_input(
+    input_fn: &ItemFn,
     context_arg: bool,
-) -> (Option<Type>, Option<Type>, Option<Pat>, Option<Pat>) {
-    match inputs.len() {
+) -> (
+    Option<Box<Type>>,
+    Option<Box<Type>>,
+    Option<Box<Pat>>,
+    Option<Box<Pat>>,
+) {
+    let inputs = &input_fn.sig.inputs;
+    let (context, args, ctx_ident, args_ident) = match inputs.len() {
         0 => (None, None, None, None),
         1 => {
             let arg = inputs.first().unwrap();
             if let FnArg::Typed(pat_type) = arg {
                 if context_arg {
                     (
-                        Some(*pat_type.ty.clone()),
+                        Some(pat_type.ty.clone()),
                         None,
-                        Some(*pat_type.pat.clone()),
+                        Some(pat_type.pat.clone()),
                         None,
                     )
                 } else {
                     (
                         None,
-                        Some(*pat_type.ty.clone()),
+                        Some(pat_type.ty.clone()),
                         None,
-                        Some(*pat_type.pat.clone()),
+                        Some(pat_type.pat.clone()),
                     )
                 }
             } else {
@@ -152,349 +275,131 @@ pub fn parse_inputs(
             let args_arg = iter.next().unwrap();
             if let (FnArg::Typed(ctx_pat), FnArg::Typed(args_pat)) = (ctx_arg, args_arg) {
                 (
-                    Some(*ctx_pat.ty.clone()),
-                    Some(*args_pat.ty.clone()),
-                    Some(*ctx_pat.pat.clone()),
-                    Some(*args_pat.pat.clone()),
+                    Some(ctx_pat.ty.clone()),
+                    Some(args_pat.ty.clone()),
+                    Some(ctx_pat.pat.clone()),
+                    Some(args_pat.pat.clone()),
                 )
             } else {
                 panic!("Expected typed arguments");
             }
         }
-        _ => panic!("rig_tool/mcp_tool expects 0-2 arguments (context and/or args)"),
-    }
+        _ => panic!("mcp_tool expects 0-2 arguments (context and/or args)"),
+    };
+
+    // Debug: Ensure context is detected correctly
+    assert!(
+        (context.is_some() && ctx_ident.is_some()) || (context.is_none() && ctx_ident.is_none()),
+        "Context and ctx_ident mismatch: context={:?}, ctx_ident={:?}",
+        context.is_some(),
+        ctx_ident.is_some()
+    );
+
+    (context, args, ctx_ident, args_ident)
 }
 
-pub fn parse_return_type(item: &ItemFn) -> Type {
-    match &item.sig.output {
+fn extract_return_type(input_fn: &ItemFn) -> Type {
+    // Extract return type
+    let return_ty = match &input_fn.sig.output {
         ReturnType::Type(_, ty) => {
             if let Type::Path(type_path) = &**ty {
                 if let Some(result) = type_path.path.segments.last() {
                     if result.ident == "Result" {
                         if let syn::PathArguments::AngleBracketed(args) = &result.arguments {
-                            if args.args.len() == 2 {
+                            if args.args.len() >= 1 {
                                 if let Some(syn::GenericArgument::Type(inner_ty)) =
                                     args.args.first()
                                 {
-                                    return inner_ty.clone();
+                                    inner_ty.clone()
+                                } else {
+                                    panic!("Expected Result<T> with type argument");
                                 }
+                            } else {
+                                panic!("Expected Result<T> with type argument");
                             }
-                            panic!("Expected Result<T, E> with two type arguments");
+                        } else {
+                            panic!("Expected Result<T> with type argument");
                         }
-                        panic!("Expected Result<T, E> with type arguments");
+                    } else {
+                        panic!("Expected Result return type");
                     }
+                } else {
                     panic!("Expected Result return type");
                 }
+            } else {
                 panic!("Expected Result return type");
             }
-            panic!("Expected Result return type");
         }
-        _ => panic!("rig_tool/mcp_tool function must return Result"),
-    }
+        _ => panic!("rig_tool function must return Result"),
+    };
+
+    return_ty
 }
 
-// fn generate_input_schema(
-//     ty: &Type,
-//     required_params: Vec<String>,
-//     param_descriptions: Vec<(String, String)>,
-//     hidden_params: Vec<String>,
-// ) -> TokenStream {
-//     let description_pairs = param_descriptions.iter().map(|(name, desc)| {
-//         quote! {
-//             if name == #name {
-//                 prop_obj.insert("description".to_string(), serde_json::Value::String(#desc.to_string()));
-//             }
-//         }
-//     });
+pub fn mcp_tool(args: TokenStream, input_fn: TokenStream) -> TokenStream {
+    let args = match syn::parse2::<ToolArgs>(args) {
+        Ok(args) => args,
+        Err(e) => return e.to_compile_error().into(),
+    };
 
-//     quote! {
-//         // {
-//             // let mut schema = yart::derive_parameters::<#ty>();
-//             // if let serde_json::Value::Object(ref mut map) = schema {
-//         //         // Add required fields
-//         //         map.insert("required".to_string(), serde_json::Value::Array(
-//         //             vec![#(
-//         //                 serde_json::Value::String(#required_params.to_string())
-//         //             ),*]
-//         //         ));
-//         //         map.remove("title");
+    let input_fn = match syn::parse2::<ItemFn>(input_fn.clone()) {
+        Ok(input_fn) => input_fn,
+        Err(e) => return e.to_compile_error().into(),
+    };
 
-//         //         // Normalize property types
-//         //         if let Some(serde_json::Value::Object(props)) = map.get_mut("properties") {
-//         //             for (name, prop) in props.iter_mut() {
-//         //                 if let serde_json::Value::Object(prop_obj) = prop {
-//         //                     // Fix number types
-//         //                     if let Some(type_val) = prop_obj.get("type") {
-//         //                         if type_val == "integer" || type_val == "number" || prop_obj.contains_key("format") {
-//         //                             prop_obj.insert("type".to_string(), serde_json::Value::String("number".to_string()));
-//         //                             prop_obj.remove("format");
-//         //                             prop_obj.remove("minimum");
-//         //                             prop_obj.remove("maximum");
-//         //                         }
-//         //                     }
-
-//         //                     // Fix optional types
-//         //                     if let Some(serde_json::Value::Array(types)) = prop_obj.get("type") {
-//         //                         if types.len() == 2 && types.contains(&serde_json::Value::String("null".to_string())) {
-//         //                             let mut main_type = types.iter()
-//         //                                 .find(|&t| t != &serde_json::Value::String("null".to_string()))
-//         //                                 .cloned()
-//         //                                 .unwrap_or(serde_json::Value::String("string".to_string()));
-//         //                             if main_type == serde_json::Value::String("integer".to_string()) {
-//         //                                 main_type = serde_json::Value::String("number".to_string());
-//         //                             }
-//         //                             prop_obj.insert("type".to_string(), main_type);
-//         //                         }
-//         //                     }
-
-//         //                     // Add descriptions
-//         //                     #(#description_pairs)*
-//         //                 }
-//         //             }
-
-//         //             // Remove hidden parameters
-//         //             #(
-//         //                 props.remove(#hidden_params);
-//         //             )*
-//         //         }
-//             // }
-//             // schema
-//     }
-// }
-
-pub fn mcp_tool(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let args = parse_macro_input!(attr as MacroArgs);
-    let input_fn = parse_macro_input!(item as ItemFn);
-
-    let description = args.description;
-    let name = args.name;
-    let context_arg = args.context_arg;
-    let read_only_hint = args.read_only_hint.unwrap_or(false);
-    let destructive_hint = args.destructive_hint.unwrap_or(true);
-    let idempotent_hint = args.idempotent_hint.unwrap_or(false);
-    let open_world_hint = args.open_world_hint.unwrap_or(true);
-
-    let vis = &input_fn.vis;
     let fn_name = &input_fn.sig.ident;
     let fn_name_str = fn_name.to_string();
-    let struct_name = syn::Ident::new(&to_upper_camel_case(&fn_name_str), fn_name.span());
-    let tool_name = name.unwrap_or_else(|| fn_name_str.clone());
-    let title = tool_name.clone();
+    let struct_name = format_ident!("{}Mcp", fn_name_str.to_case(Case::Pascal));
+    let tool_name = args.name.unwrap_or(fn_name_str.clone());
+    let tool_description = args.description.unwrap_or_default();
+    let context_arg = args.context_arg;
 
-    let (context, args, ctx_ident, args_ident) = parse_inputs(&input_fn.sig.inputs, context_arg);
+    // Tool annotations
+    let title = args.annotations.title.unwrap_or(fn_name_str.clone());
+    let read_only_hint = args.annotations.read_only_hint.unwrap_or(false);
+    let destructive_hint = args.annotations.destructive_hint.unwrap_or(true);
+    let idempotent_hint = args.annotations.idempotent_hint.unwrap_or(false);
+    let open_world_hint = args.annotations.open_world_hint.unwrap_or(true);
+
+    let (context, args, ctx_ident, args_ident) = extract_input(&input_fn, context_arg);
+
     let args_ty = args
         .as_ref()
-        .map_or_else(|| parse_quote! { () }, |ty| ty.clone());
+        .map_or_else(|| parse_quote! { () }, |ty| *ty.clone());
     let ctx_ty = context
         .as_ref()
-        .map_or_else(|| parse_quote! { () }, |ty| ty.clone());
-    let return_ty = parse_return_type(&input_fn);
-    let error_ty: Type = parse_quote! { anyhow::Error };
+        .map_or_else(|| parse_quote! { () }, |ty| *ty.clone());
 
-    let params_struct_name = syn::Ident::new(&format!("{}Parameters", struct_name), fn_name.span());
+    let return_type = extract_return_type(&input_fn);
 
-    let mut param_defs = Vec::new();
-    let mut param_names = Vec::new();
-    let mut required_params = Vec::new();
-    let mut hidden_params = Vec::new();
-    let mut param_descriptions = Vec::new();
-
-    let params = if context_arg && input_fn.sig.inputs.len() == 2 {
-        input_fn.sig.inputs.iter().skip(1).collect::<Vec<_>>()
-    } else if !context_arg && input_fn.sig.inputs.len() >= 1 {
-        input_fn.sig.inputs.iter().collect::<Vec<_>>()
-    } else {
-        Vec::new()
+    let call_signature = match context.is_some() {
+        true => quote! {#ctx_ident: #ctx_ty},
+        false => quote! {},
     };
 
-    for arg in params {
-        if let FnArg::Typed(PatType { pat, ty, .. }) = arg {
-            let mut is_hidden = false;
-            let mut description: Option<String> = None;
-            let mut is_optional = false;
+    let expanded = quote! {
 
-            // Check for tool_param macro
-            if let Type::Macro(type_macro) = &**ty {
-                if let Some(ident) = type_macro.mac.path.get_ident() {
-                    if ident == "tool_param" {
-                        if let Ok(tool_param_args) =
-                            syn::parse2::<ToolParamArgs>(type_macro.mac.tokens.clone())
-                        {
-                            is_hidden = tool_param_args.hidden;
-                            description = tool_param_args.description;
+        #input_fn
 
-                            if let Type::Path(type_path) = &tool_param_args.ty {
-                                is_optional = type_path
-                                    .path
-                                    .segments
-                                    .last()
-                                    .map_or(false, |segment| segment.ident == "Option");
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Fallback: check if type is Option<T>
-            if !is_optional {
-                if let Type::Path(type_path) = &**ty {
-                    is_optional = type_path
-                        .path
-                        .segments
-                        .last()
-                        .map_or(false, |segment| segment.ident == "Option");
-                }
-            }
-
-            if let Pat::Ident(param_ident) = &**pat {
-                let param_name = &param_ident.ident;
-                let param_name_str = param_name.to_string();
-
-                param_names.push(param_name.clone());
-                param_defs.push(quote! { #param_name: #ty });
-
-                if is_hidden {
-                    hidden_params.push(param_name_str.clone());
-                } else if !is_optional {
-                    required_params.push(param_name_str.clone());
-                }
-
-                if let Some(desc) = description {
-                    param_descriptions.push((param_name_str.clone(), desc));
-                }
-            }
-        }
-    }
-
-    // let input_schema = generate_input_schema(
-    //     &args_ty,
-    //     required_params.iter().map(|s| s.to_string()).collect(),
-    //     param_descriptions
-    //         .iter()
-    //         .map(|(n, d)| (n.to_string(), d.to_string()))
-    //         .collect(),
-    //     hidden_params.iter().map(|s| s.to_string()).collect(),
-    // );
-
-    let call_args = if context_arg {
-        let ctx_ident = ctx_ident.as_ref().unwrap();
-        quote! { #ctx_ident, #(params.#param_names),* }
-    } else {
-        quote! { #(params.#param_names),* }
-    };
-
-    let call_body = quote! {
-        let params = match req.arguments {
-            Some(args) => serde_json::to_value(args).unwrap_or_default(),
-            None => serde_json::Value::Null,
-        };
-
-        let params: #params_struct_name = match serde_json::from_value(params) {
-            Ok(p) => p,
-            Err(e) => return mcp_core::types::CallToolResponse {
-                content: vec![mcp_core::types::ToolResponseContent::Text(
-                    mcp_core::types::TextContent {
-                        content_type: "text".to_string(),
-                        text: format!("Invalid parameters: {}", e),
-                        annotations: None,
-                    }
-                )],
-                is_error: Some(true),
-                meta: req.meta,
-            },
-        };
-
-        let #ctx_ident = self.context.clone();
-        match #struct_name::internal_call(#call_args).await {
-            Ok(response) => {
-                let content = if let Ok(vec_content) = serde_json::from_value::<Vec<mcp_core::types::ToolResponseContent>>(serde_json::to_value(&response).unwrap_or_default()) {
-                    vec_content
-                } else if let Ok(single_content) = serde_json::from_value::<mcp_core::types::ToolResponseContent>(serde_json::to_value(&response).unwrap_or_default()) {
-                    vec![single_content]
-                } else {
-                    vec![mcp_core::types::ToolResponseContent::Text(
-                        mcp_core::types::TextContent {
-                            content_type: "text".to_string(),
-                            text: format!("Invalid response type: {:?}", response),
-                            annotations: None,
-                        }
-                    )]
-                };
-                mcp_core::types::CallToolResponse {
-                    content,
-                    is_error: None,
-                    meta: req.meta,
-                }
-            }
-            Err(e) => mcp_core::types::CallToolResponse {
-                content: vec![mcp_core::types::ToolResponseContent::Text(
-                    mcp_core::types::TextContent {
-                        content_type: "text".to_string(),
-                        text: format!("Tool execution error: {}", e),
-                        annotations: None,
-                    }
-                )],
-                is_error: Some(true),
-                meta: req.meta,
-            },
-        }
-    };
-
-    let new_method = if context_arg {
-        let ctx_ident = ctx_ident.as_ref().expect("Context identifier missing");
-        quote! {
-            pub fn new(#ctx_ident: #ctx_ty) -> Self {
-                Self { context: #ctx_ident }
-            }
-        }
-    } else {
-        quote! {
-            pub fn new() -> Self {
-                Self { context: () }
-            }
-        }
-    };
-
-    let internal_call_inputs = if context_arg {
-        let ctx_ident = ctx_ident.as_ref().unwrap();
-        if !param_defs.is_empty() {
-            quote! { #ctx_ident: #ctx_ty, #(#param_defs),* }
-        } else {
-            quote! { #ctx_ident: #ctx_ty }
-        }
-    } else {
-        quote! { #(#param_defs),* }
-    };
-
-    let fn_body = &input_fn.block;
-
-    let handler_fn = quote! {
-        |req: mcp_core::types::CallToolRequest| -> std::pin::Pin<Box<dyn std::future::Future<Output = mcp_core::types::CallToolResponse> + Send>> {
-            Box::pin(async move {
-                let tool = #struct_name::new(#ctx_ty::default());
-                #call_body
-            })
-        }
-    };
-
-    let output = quote! {
-        #[derive(serde::Deserialize, schemars::JsonSchema)]
-        struct #params_struct_name {
-            #(#param_defs,)*
-        }
-
-        #vis pub struct #struct_name {
-            context: #ctx_ty,
-        }
+        #[derive(Default)]
+        pub struct #struct_name;
 
         impl #struct_name {
-            #new_method
-
             pub fn tool() -> mcp_core::types::Tool {
-                mcp_core::types::Tool {
+                let schema = serde_json::to_value(schemars::schema_for!(#args_ty)).expect("Failed to serialize schema");
+
+                let annotations = serde_json::json!({
+                    "title": #title,
+                    "readOnlyHint": #read_only_hint,
+                    "destructiveHint": #destructive_hint,
+                    "idempotentHint": #idempotent_hint,
+                    "openWorldHint": #open_world_hint
+                });
+
+                 mcp_core::types::Tool {
                     name: #tool_name.to_string(),
-                    description: Some(#description.to_string()),
-                    input_schema: yart::derive_parameters::<#args_ty>(),
+                    description: Some(#tool_description.to_string()),
+                    input_schema: schema,
                     annotations: Some(mcp_core::types::ToolAnnotations {
                         title: Some(#title.to_string()),
                         read_only_hint: Some(#read_only_hint),
@@ -505,62 +410,384 @@ pub fn mcp_tool(attr: TokenStream, item: TokenStream) -> TokenStream {
                 }
             }
 
-            pub fn handler() -> mcp_core::tools::ToolHandler {
-                mcp_core::tools::ToolHandler {
-                    tool: Self::tool(),
-                    f: Box::new(#handler_fn),
-                }
-            }
-
-            async fn internal_call(#internal_call_inputs) -> Result<#return_ty, #error_ty> {
-                #fn_body
+            pub fn call(#call_signature) -> mcp_core::tools::ToolHandlerFn {
+                   move |req: mcp_core::types::CallToolRequest| {
+                   }
             }
         }
     };
 
-    output.into()
+    expanded.into()
+
+    // let debug_msg = format!(
+    //     "Context and ctx_ident mismatch: context={:?}, ctx_ident={:?}",
+    //     ctx_ty.to_token_stream().to_string(),
+    //     args_ty.to_token_stream().to_string(),
+    // );
+
+    // quote! {
+    //     compile_error!(#debug_msg)
+    // }
+    // .into()
 }
 
-#[derive(Debug)]
-struct ToolParamArgs {
-    ty: Type,
-    hidden: bool,
-    description: Option<String>,
-}
+#[cfg(test)]
+mod test_mcp_macro {
+    use anyhow::Result;
+    use proc_macro2::TokenStream;
+    use quote::ToTokens;
+    use syn::{parse_quote, Attribute};
 
-impl syn::parse::Parse for ToolParamArgs {
-    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let mut hidden = false;
-        let mut description = None;
-        let ty = input.parse()?;
+    use crate::mcp_macro::{extract_input, extract_return_type};
 
-        if input.peek(Token![,]) {
-            input.parse::<Token![,]>()?;
-            let meta_list: Punctuated<Meta, Token![,]> = Punctuated::parse_terminated(input)?;
+    use super::{mcp_tool, ToolArgs};
 
-            for meta in meta_list {
-                match meta {
-                    Meta::Path(path) if path.is_ident("hidden") => {
-                        hidden = true;
-                    }
-                    Meta::NameValue(nv) if nv.path.is_ident("description") => {
-                        if let Expr::Lit(ExprLit {
-                            lit: Lit::Str(lit_str),
-                            ..
-                        }) = &nv.value
-                        {
-                            description = Some(lit_str.value().to_string());
-                        }
-                    }
-                    _ => {}
-                }
-            }
+    fn get_inner_token_stream(attr: Attribute) -> Result<TokenStream> {
+        let args_ts = match attr.meta {
+            syn::Meta::List(syn::MetaList { tokens, .. }) => Ok(tokens),
+            _ => Err(syn::Error::new_spanned(attr.meta, "Expected mcp_tool(...)")),
         }
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-        Ok(ToolParamArgs {
-            ty,
-            hidden,
-            description,
-        })
+        Ok(args_ts)
+    }
+
+    #[test]
+    fn gen_code() -> Result<()> {
+        // Parse attribute and extract inner mcp_tool(...) TokenStream
+        let attr: syn::Attribute =
+            parse_quote! { #[mcp_tool(description = "TEST_XX", context_arg = true)] };
+        let args_ts = match attr.meta {
+            syn::Meta::List(syn::MetaList { tokens, .. }) => Ok(tokens),
+            _ => Err(syn::Error::new_spanned(attr.meta, "Expected mcp_tool(...)")),
+        }
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        let input_fn: syn::ItemFn =
+            parse_quote! { async fn test_tool(args: MyArgs) -> Result<()> { Ok(()) } };
+
+        // Convert proc_macro2::TokenStream to proc_macro::TokenStream
+        let ret = mcp_tool(args_ts.to_token_stream(), input_fn.to_token_stream());
+
+        println!("{}", ret);
+
+        Ok(())
+    }
+
+    #[test]
+    fn argument_description() -> Result<()> {
+        let args = get_inner_token_stream(parse_quote! { #[mcp_tool(description = "TEST_XX")] })?;
+
+        let args = match syn::parse2::<ToolArgs>(args.into()) {
+            Ok(args) => args,
+            Err(e) => return Err(anyhow::anyhow!("parse error: {}", e)),
+        };
+
+        assert_eq!(args.name, None);
+        assert_eq!(args.description, Some("TEST_XX".to_string()));
+        assert_eq!(args.context_arg, false);
+        assert_eq!(args.annotations.title, None);
+        assert_eq!(args.annotations.read_only_hint, None);
+        assert_eq!(args.annotations.destructive_hint, None);
+        assert_eq!(args.annotations.idempotent_hint, None);
+        assert_eq!(args.annotations.open_world_hint, None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn argument_name() -> Result<()> {
+        let args = get_inner_token_stream(parse_quote! { #[mcp_tool(name = "TEST_XX")] })?;
+
+        let args = match syn::parse2::<ToolArgs>(args.into()) {
+            Ok(args) => args,
+            Err(e) => return Err(anyhow::anyhow!("parse error: {}", e)),
+        };
+
+        assert_eq!(args.name, Some("TEST_XX".to_string()));
+        assert_eq!(args.description, None);
+        assert_eq!(args.context_arg, false);
+        assert_eq!(args.annotations.title, None);
+        assert_eq!(args.annotations.read_only_hint, None);
+        assert_eq!(args.annotations.destructive_hint, None);
+        assert_eq!(args.annotations.idempotent_hint, None);
+        assert_eq!(args.annotations.open_world_hint, None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn argument_context_arg() -> Result<()> {
+        let args = get_inner_token_stream(parse_quote! { #[mcp_tool(context_arg = true)] })?;
+
+        let args = match syn::parse2::<ToolArgs>(args.into()) {
+            Ok(args) => args,
+            Err(e) => return Err(anyhow::anyhow!("parse error: {}", e)),
+        };
+
+        assert_eq!(args.name, None);
+        assert_eq!(args.description, None);
+        assert_eq!(args.context_arg, true);
+        assert_eq!(args.annotations.title, None);
+        assert_eq!(args.annotations.read_only_hint, None);
+        assert_eq!(args.annotations.destructive_hint, None);
+        assert_eq!(args.annotations.idempotent_hint, None);
+        assert_eq!(args.annotations.open_world_hint, None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn argument_read_only_hint() -> Result<()> {
+        let args = get_inner_token_stream(parse_quote! { #[mcp_tool(read_only_hint = true)] })?;
+
+        let args = match syn::parse2::<ToolArgs>(args.into()) {
+            Ok(args) => args,
+            Err(e) => return Err(anyhow::anyhow!("parse error: {}", e)),
+        };
+
+        assert_eq!(args.name, None);
+        assert_eq!(args.description, None);
+        assert_eq!(args.context_arg, false);
+        assert_eq!(args.annotations.title, None);
+        assert_eq!(args.annotations.read_only_hint, Some(true));
+        assert_eq!(args.annotations.destructive_hint, None);
+        assert_eq!(args.annotations.idempotent_hint, None);
+        assert_eq!(args.annotations.open_world_hint, None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn argument_destructive_hint() -> Result<()> {
+        let args = get_inner_token_stream(parse_quote! { #[mcp_tool(destructive_hint = true)] })?;
+
+        let args = match syn::parse2::<ToolArgs>(args.into()) {
+            Ok(args) => args,
+            Err(e) => return Err(anyhow::anyhow!("parse error: {}", e)),
+        };
+
+        assert_eq!(args.name, None);
+        assert_eq!(args.description, None);
+        assert_eq!(args.context_arg, false);
+        assert_eq!(args.annotations.title, None);
+        assert_eq!(args.annotations.read_only_hint, None);
+        assert_eq!(args.annotations.destructive_hint, Some(true));
+        assert_eq!(args.annotations.idempotent_hint, None);
+        assert_eq!(args.annotations.open_world_hint, None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn argument_idempotent_hint() -> Result<()> {
+        let args = get_inner_token_stream(parse_quote! { #[mcp_tool(idempotent_hint = true)] })?;
+
+        let args = match syn::parse2::<ToolArgs>(args.into()) {
+            Ok(args) => args,
+            Err(e) => return Err(anyhow::anyhow!("parse error: {}", e)),
+        };
+
+        assert_eq!(args.name, None);
+        assert_eq!(args.description, None);
+        assert_eq!(args.context_arg, false);
+        assert_eq!(args.annotations.title, None);
+        assert_eq!(args.annotations.read_only_hint, None);
+        assert_eq!(args.annotations.destructive_hint, None);
+        assert_eq!(args.annotations.idempotent_hint, Some(true));
+        assert_eq!(args.annotations.open_world_hint, None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn argument_open_world_hint() -> Result<()> {
+        let args = get_inner_token_stream(parse_quote! { #[mcp_tool(open_world_hint = true)] })?;
+
+        let args = match syn::parse2::<ToolArgs>(args.into()) {
+            Ok(args) => args,
+            Err(e) => return Err(anyhow::anyhow!("parse error: {}", e)),
+        };
+
+        assert_eq!(args.name, None);
+        assert_eq!(args.description, None);
+        assert_eq!(args.context_arg, false);
+        assert_eq!(args.annotations.title, None);
+        assert_eq!(args.annotations.read_only_hint, None);
+        assert_eq!(args.annotations.destructive_hint, None);
+        assert_eq!(args.annotations.idempotent_hint, None);
+        assert_eq!(args.annotations.open_world_hint, Some(true));
+
+        Ok(())
+    }
+
+    #[test]
+    fn argument_annotations_title() -> Result<()> {
+        let args =
+            get_inner_token_stream(parse_quote! { #[mcp_tool(annotations(title = "_title"))] })?;
+
+        let args = match syn::parse2::<ToolArgs>(args.into()) {
+            Ok(args) => args,
+            Err(e) => return Err(anyhow::anyhow!("parse error: {}", e)),
+        };
+
+        assert_eq!(args.name, None);
+        assert_eq!(args.description, None);
+        assert_eq!(args.context_arg, false);
+        assert_eq!(args.annotations.title, Some("_title".to_string()));
+        assert_eq!(args.annotations.read_only_hint, None);
+        assert_eq!(args.annotations.destructive_hint, None);
+        assert_eq!(args.annotations.idempotent_hint, None);
+        assert_eq!(args.annotations.open_world_hint, None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn argument_annotations() -> Result<()> {
+        let args = get_inner_token_stream(
+            parse_quote! { #[mcp_tool(annotations(title = "_title", read_only_hint=true,  destructive_hint=true,  idempotent_hint=true,  open_world_hint=true, ))] },
+        )?;
+
+        let args = match syn::parse2::<ToolArgs>(args.into()) {
+            Ok(args) => args,
+            Err(e) => return Err(anyhow::anyhow!("parse error: {}", e)),
+        };
+
+        assert_eq!(args.name, None);
+        assert_eq!(args.description, None);
+        assert_eq!(args.context_arg, false);
+        assert_eq!(args.annotations.title, Some("_title".to_string()));
+        assert_eq!(args.annotations.read_only_hint, Some(true));
+        assert_eq!(args.annotations.destructive_hint, Some(true));
+        assert_eq!(args.annotations.idempotent_hint, Some(true));
+        assert_eq!(args.annotations.open_world_hint, Some(true));
+
+        Ok(())
+    }
+
+    #[test]
+    fn extract_input_context_and_args() -> Result<()> {
+        let input_fn: syn::ItemFn = parse_quote! { async fn test_tool(ctx:Arc<String>,args: MyArgs) -> Result<()> { Ok(()) } };
+
+        // Convert proc_macro2::TokenStream to proc_macro::TokenStream
+        let (context, args, ctx_ident, args_ident) = extract_input(&input_fn, false);
+
+        assert_eq!(context.is_some(), true);
+        assert_eq!(
+            *(context.unwrap()).into_token_stream().to_string(),
+            "Arc < String >".to_string()
+        );
+        assert_eq!(args.is_some(), true);
+        assert_eq!(
+            *(args.unwrap()).into_token_stream().to_string(),
+            "MyArgs".to_string()
+        );
+        assert_eq!(ctx_ident.is_some(), true);
+        assert_eq!(
+            *(ctx_ident.unwrap()).into_token_stream().to_string(),
+            "ctx".to_string()
+        );
+        assert_eq!(args_ident.is_some(), true);
+        assert_eq!(
+            *(args_ident.unwrap()).into_token_stream().to_string(),
+            "args".to_string()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn extract_input_context() -> Result<()> {
+        let input_fn: syn::ItemFn =
+            parse_quote! { async fn test_tool(ctx:Arc<String>) -> Result<()> { Ok(()) } };
+
+        // Convert proc_macro2::TokenStream to proc_macro::TokenStream
+        let (context, args, ctx_ident, args_ident) = extract_input(&input_fn, true);
+
+        assert_eq!(context.is_some(), true);
+        assert_eq!(
+            *(context.unwrap()).into_token_stream().to_string(),
+            "Arc < String >".to_string()
+        );
+        assert_eq!(args.is_some(), false);
+        assert_eq!(ctx_ident.is_some(), true);
+        assert_eq!(
+            *(ctx_ident.unwrap()).into_token_stream().to_string(),
+            "ctx".to_string()
+        );
+        assert_eq!(args_ident.is_some(), false);
+
+        Ok(())
+    }
+
+    #[test]
+    fn extract_input_args() -> Result<()> {
+        let input_fn: syn::ItemFn =
+            parse_quote! { async fn test_tool(args: MyArgs) -> Result<()> { Ok(()) } };
+
+        // Convert proc_macro2::TokenStream to proc_macro::TokenStream
+        let (context, args, ctx_ident, args_ident) = extract_input(&input_fn, false);
+
+        assert_eq!(context.is_some(), false);
+        assert_eq!(args.is_some(), true);
+        assert_eq!(
+            *(args.unwrap()).into_token_stream().to_string(),
+            "MyArgs".to_string()
+        );
+        assert_eq!(ctx_ident.is_some(), false);
+        assert_eq!(args_ident.is_some(), true);
+        assert_eq!(
+            *(args_ident.unwrap()).into_token_stream().to_string(),
+            "args".to_string()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn extract_input_no_input() -> Result<()> {
+        let input_fn: syn::ItemFn = parse_quote! { async fn test_tool() -> Result<()> { Ok(()) } };
+
+        // Convert proc_macro2::TokenStream to proc_macro::TokenStream
+        let (context, args, ctx_ident, args_ident) = extract_input(&input_fn, false);
+
+        assert_eq!(context.is_some(), false);
+        assert_eq!(args.is_some(), false);
+        assert_eq!(ctx_ident.is_some(), false);
+        assert_eq!(args_ident.is_some(), false);
+
+        Ok(())
+    }
+
+    #[test]
+    fn extract_return_type_blanket() -> Result<()> {
+        let input_fn: syn::ItemFn = parse_quote! { async fn test_tool() -> Result<()> { Ok(()) } };
+
+        // Convert proc_macro2::TokenStream to proc_macro::TokenStream
+        let return_type = extract_return_type(&input_fn);
+
+        assert_eq!(
+            return_type.into_token_stream().to_string(),
+            "()".to_string()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn extract_return_type_named() -> Result<()> {
+        let input_fn: syn::ItemFn =
+            parse_quote! { async fn test_tool() -> Result<Response> { Ok(()) } };
+
+        // Convert proc_macro2::TokenStream to proc_macro::TokenStream
+        let return_type = extract_return_type(&input_fn);
+
+        assert_eq!(
+            return_type.into_token_stream().to_string(),
+            "Response".to_string()
+        );
+
+        Ok(())
     }
 }
