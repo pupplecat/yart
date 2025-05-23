@@ -36,46 +36,21 @@ impl Into<Vec<ToolResponseContent>> for ToolOutput {
     }
 }
 
-/// Executes a search tool with context and input arguments.
-#[yart::mcp_tool(description = "Brand new tool")]
-async fn execute_search(ctx: Arc<ToolContext>, args: ToolInput) -> Result<ToolOutput> {
+async fn execute_search_inner(ctx: Arc<ToolContext>, args: ToolInput) -> Result<ToolOutput> {
     Ok(ToolOutput {
         result: format!("{}, {}", ctx.value, args.value),
     })
 }
 
-/// Executes a search tool with only input arguments.
+/// Executes a search tool with context and input arguments.
+#[yart::rig_tool(description = "Brand new tool")]
+async fn execute_search_rig(ctx: Arc<ToolContext>, args: ToolInput) -> Result<ToolOutput> {
+    execute_search_inner(ctx, args).await
+}
+
 #[yart::mcp_tool(description = "Brand new tool")]
-async fn execute_search_without_context(args: ToolInput) -> Result<ToolOutput> {
-    Ok(ToolOutput {
-        result: format!("{}", args.value),
-    })
-}
-
-/// Executes a search tool with only context.
-#[yart::mcp_tool(description = "Brand new tool", context_arg = true)]
-async fn execute_search_without_argument(ctx: Arc<ToolContext>) -> Result<ToolOutput> {
-    Ok(ToolOutput {
-        result: format!("{}", ctx.value),
-    })
-}
-
-/// Executes a search tool with no arguments or context.
-#[yart::mcp_tool(description = "Brand new tool")]
-async fn execute_search_bare() -> Result<ToolOutput> {
-    Ok(ToolOutput {
-        result: "Hello world".to_string(),
-    })
-}
-
-#[tokio::test]
-async fn test_mcp_tool_basic() -> Result<()> {
-    let tool = ExecuteSearch::tool();
-
-    assert_eq!(tool.name, "execute_search");
-    assert_eq!(tool.description.unwrap(), "Brand new tool");
-
-    Ok(())
+async fn execute_search_mcp(ctx: Arc<ToolContext>, args: ToolInput) -> Result<ToolOutput> {
+    execute_search_inner(ctx, args).await
 }
 
 #[tokio::test]
@@ -94,8 +69,8 @@ async fn test_build_server() -> Result<()> {
         ..Default::default()
     })
     .register_tool(
-        ExecuteSearchWithoutArgument::tool(),
-        ExecuteSearchWithoutArgument::call(ctx.clone()),
+        ExecuteSearchMcp::tool(),
+        ExecuteSearchMcp::call(ctx.clone()),
     )
     .build();
 

@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::Arc;
-use yart::ToolError;
+
 // Mock context and types
 #[derive(Clone)]
 pub struct TestContext {
@@ -28,7 +28,7 @@ pub struct TestOutput {
 )]
 async fn test_tool(ctx: Arc<TestContext>, args: TestArgs) -> Result<TestOutput> {
     if args.input.is_empty() {
-        return Err(ToolError::new("Input cannot be empty"));
+        return Err(anyhow::anyhow!("Input cannot be empty"));
     }
     Ok(TestOutput {
         result: format!("{}: {}", ctx.value, args.input),
@@ -45,7 +45,7 @@ async fn custom_name(
     args: TestArgs,
 ) -> anyhow::Result<TestOutput, ToolError> {
     if args.input.is_empty() {
-        return Err(ToolError::new("Input cannot be empty"));
+        return Err(anyhow::anyhow!("Input cannot be empty"));
     }
     Ok(TestOutput {
         result: format!("{}: {}", ctx.value, args.input),
@@ -56,7 +56,7 @@ async fn custom_name(
 #[yart::rig_tool(description = "A test tool that echoes input without context")]
 async fn without_context(args: TestArgs) -> anyhow::Result<TestOutput, ToolError> {
     if args.input.is_empty() {
-        return Err(ToolError::new("Input cannot be empty"));
+        return Err(anyhow::anyhow!("Input cannot be empty"));
     }
     Ok(TestOutput {
         result: args.input.to_string(),
@@ -70,7 +70,7 @@ async fn without_name(
     args: TestArgs,
 ) -> anyhow::Result<TestOutput, ToolError> {
     if args.input.is_empty() {
-        return Err(ToolError::new("Input cannot be empty"));
+        return Err(anyhow::anyhow!("Input cannot be empty"));
     }
     Ok(TestOutput {
         result: format!("{}: {}", bbb.value, args.input),
@@ -138,7 +138,7 @@ async fn error_tool(
     ctx: Arc<TestContext>,
     args: TestArgs,
 ) -> anyhow::Result<TestOutput, ToolError> {
-    Err(ToolError::new("Forced error"))
+    Err(anyhow::anyhow!("Forced error"))
 }
 
 // Context with optional field

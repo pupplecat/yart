@@ -1,15 +1,14 @@
 extern crate proc_macro;
 
-use proc_macro::TokenStream;
-use quote::quote;
+use convert_case::{Case, Casing};
+use proc_macro2::TokenStream;
+use quote::{format_ident, quote};
 use syn::{
     parse::{Parse, ParseStream},
-    parse_macro_input, parse_quote,
+    parse_quote,
     punctuated::Punctuated,
     Expr, ExprLit, FnArg, ItemFn, Lit, Meta, ReturnType, Token, Type,
 };
-
-use crate::common::to_upper_camel_case;
 
 struct MacroArgs {
     description: String,
@@ -66,8 +65,18 @@ impl Parse for MacroArgs {
 }
 
 pub fn rig_tool(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let args = parse_macro_input!(attr as MacroArgs);
-    let item = parse_macro_input!(item as ItemFn);
+    // let args = parse_macro_input!(attr as MacroArgs);
+    // let item = parse_macro_input!(item as ItemFn);
+
+    let args = match syn::parse2::<MacroArgs>(attr) {
+        Ok(args) => args,
+        Err(e) => return e.to_compile_error().into(),
+    };
+
+    let item = match syn::parse2::<ItemFn>(item.clone()) {
+        Ok(input_fn) => input_fn,
+        Err(e) => return e.to_compile_error().into(),
+    };
 
     let description = args.description;
     let name = args.name;
@@ -75,8 +84,9 @@ pub fn rig_tool(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let vis = &item.vis;
     let fn_name = &item.sig.ident;
+    let fn_name_str = fn_name.to_string();
     // Convert function name to UpperCamelCase for struct name
-    let struct_name = syn::Ident::new(&to_upper_camel_case(&fn_name.to_string()), fn_name.span());
+    let struct_name = format_ident!("{}", fn_name_str.to_case(Case::Pascal));
     // Use provided name or function name
     let tool_name = name.unwrap_or_else(|| format!("{}", fn_name));
 
@@ -149,10 +159,10 @@ pub fn rig_tool(attr: TokenStream, item: TokenStream) -> TokenStream {
                             if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
                                 inner_ty.clone()
                             } else {
-                                panic!("Expected Result<T, E> with type argument");
+                                panic!("Expected Result<T> with type argument");
                             }
                         } else {
-                            panic!("Expected Result<T, E> with type arguments");
+                            panic!("Expected Result<T> with type arguments");
                         }
                     } else {
                         panic!("Expected Result return type");
@@ -166,9 +176,6 @@ pub fn rig_tool(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
         _ => panic!("rig_tool function must return Result"),
     };
-
-    // Error type
-    let error_ty: Type = parse_quote! { yart::ToolError };
 
     // Generate internal_call with original parameter names
     let internal_call_inputs = match (context.is_some(), args.is_some()) {
@@ -292,7 +299,7 @@ pub fn rig_tool(attr: TokenStream, item: TokenStream) -> TokenStream {
         impl #struct_name {
             #new_method
 
-            async fn internal_call(#internal_call_inputs) -> Result<#return_ty, #error_ty> {
+            async fn internal_call(#internal_call_inputs) -> anyhow::Result<#return_ty> {
                 #fn_body
             }
         }

@@ -388,7 +388,7 @@ pub fn mcp_tool(args: TokenStream, input_fn: TokenStream) -> TokenStream {
 
     let fn_name = &input_fn.sig.ident;
     let fn_name_str = fn_name.to_string();
-    let struct_name = format_ident!("{}Mcp", fn_name_str.to_case(Case::Pascal));
+    let struct_name = format_ident!("{}", fn_name_str.to_case(Case::Pascal));
     let tool_name = attrs.name.unwrap_or(fn_name_str.clone());
     let tool_description = attrs.description.unwrap_or_default();
     let context_arg = attrs.context_arg;

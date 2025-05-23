@@ -1,5 +1,3 @@
-mod common;
-
 #[cfg(not(test))]
 mod mcp_macro;
 #[cfg(test)]
@@ -13,7 +11,7 @@ use proc_macro::TokenStream;
 
 #[proc_macro_attribute]
 pub fn rig_tool(attr: TokenStream, item: TokenStream) -> TokenStream {
-    rig_macro::rig_tool(attr, item)
+    rig_macro::rig_tool(attr.into(), item.into()).into()
 }
 
 #[proc_macro_attribute]
