@@ -1,23 +1,55 @@
 use convert_case::{Case, Casing};
 use proc_macro2::TokenStream;
-use quote::{format_ident, quote, ToTokens};
+use quote::{format_ident, quote};
 use syn::{
     parse::{Parse, ParseStream},
     parse_quote,
     punctuated::Punctuated,
-    Expr, ExprLit, FnArg, Item, ItemFn, Lit, Meta, Pat, PatType, ReturnType, Token, Type,
+    Expr, ExprLit, FnArg, Ident, ItemFn, Lit, Meta, Pat, Token, Type,
 };
 
+/// Attributes parsed from the `mcp_tool` macro invocation.
 #[derive(Debug)]
-struct ToolArgs {
+struct ToolAttributes {
     name: Option<String>,
     description: Option<String>,
     context_arg: bool,
-    annotations: ToolAnnotations,
+    metadata: ToolMetadata,
 }
 
-#[derive(Debug)]
-struct ToolAnnotations {
+/// Represents a function parameter, including its identifier and type.
+struct FunctionParameter {
+    ident: Option<Box<Pat>>,
+    ty: Type,
+}
+
+impl FunctionParameter {
+    fn has_value(&self) -> bool {
+        self.ident.is_some()
+    }
+
+    fn get_ident(&self) -> Box<Pat> {
+        self.ident.clone().unwrap()
+    }
+
+    fn get_call_signature(&self) -> (TokenStream, TokenStream) {
+        match self.has_value() {
+            true => {
+                let ctx_ident = self.ident.as_ref().unwrap();
+                let ctx_ty = &self.ty;
+                (
+                    quote! {#ctx_ident: #ctx_ty},
+                    quote! {let #ctx_ident = #ctx_ident.clone();},
+                )
+            }
+            false => (quote! {}, quote! {}),
+        }
+    }
+}
+
+/// Metadata annotations for the tool, such as hints and titles.
+#[derive(Debug, Default)]
+struct ToolMetadata {
     title: Option<String>,
     read_only_hint: Option<bool>,
     destructive_hint: Option<bool>,
@@ -25,24 +57,12 @@ struct ToolAnnotations {
     open_world_hint: Option<bool>,
 }
 
-impl Default for ToolAnnotations {
-    fn default() -> Self {
-        Self {
-            title: None,
-            read_only_hint: None,
-            destructive_hint: None,
-            idempotent_hint: None,
-            open_world_hint: None,
-        }
-    }
-}
-
-impl Parse for ToolArgs {
+impl Parse for ToolAttributes {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut name = None;
         let mut description = None;
         let mut context_arg = false;
-        let mut annotations = ToolAnnotations::default();
+        let mut metadata = ToolMetadata::default();
 
         let meta_list: Punctuated<Meta, Token![,]> = Punctuated::parse_terminated(input)?;
 
@@ -99,7 +119,7 @@ impl Parse for ToolArgs {
                                 ..
                             }) = nv.value
                             {
-                                annotations.read_only_hint = Some(lit_bool.value);
+                                metadata.read_only_hint = Some(lit_bool.value);
                             } else {
                                 return Err(syn::Error::new_spanned(
                                     nv.value,
@@ -113,7 +133,7 @@ impl Parse for ToolArgs {
                                 ..
                             }) = nv.value
                             {
-                                annotations.destructive_hint = Some(lit_bool.value);
+                                metadata.destructive_hint = Some(lit_bool.value);
                             } else {
                                 return Err(syn::Error::new_spanned(
                                     nv.value,
@@ -127,7 +147,7 @@ impl Parse for ToolArgs {
                                 ..
                             }) = nv.value
                             {
-                                annotations.idempotent_hint = Some(lit_bool.value);
+                                metadata.idempotent_hint = Some(lit_bool.value);
                             } else {
                                 return Err(syn::Error::new_spanned(
                                     nv.value,
@@ -141,7 +161,7 @@ impl Parse for ToolArgs {
                                 ..
                             }) = nv.value
                             {
-                                annotations.open_world_hint = Some(lit_bool.value);
+                                metadata.open_world_hint = Some(lit_bool.value);
                             } else {
                                 return Err(syn::Error::new_spanned(
                                     nv.value,
@@ -160,18 +180,16 @@ impl Parse for ToolArgs {
                 Meta::List(list) if list.path.is_ident("annotations") => {
                     let nested: Punctuated<Meta, Token![,]> =
                         list.parse_args_with(Punctuated::parse_terminated)?;
-
                     for meta in nested {
                         if let Meta::NameValue(nv) = meta {
                             let key = nv.path.get_ident().unwrap().to_string();
-
                             if let Expr::Lit(ExprLit {
                                 lit: Lit::Str(lit_str),
                                 ..
                             }) = nv.value
                             {
                                 if key == "title" {
-                                    annotations.title = Some(lit_str.value());
+                                    metadata.title = Some(lit_str.value());
                                 } else {
                                     return Err(syn::Error::new_spanned(
                                         nv.path,
@@ -185,22 +203,22 @@ impl Parse for ToolArgs {
                             {
                                 match key.as_str() {
                                     "read_only_hint" | "readOnlyHint" => {
-                                        annotations.read_only_hint = Some(lit_bool.value)
+                                        metadata.read_only_hint = Some(lit_bool.value)
                                     }
                                     "destructive_hint" | "destructiveHint" => {
-                                        annotations.destructive_hint = Some(lit_bool.value)
+                                        metadata.destructive_hint = Some(lit_bool.value)
                                     }
                                     "idempotent_hint" | "idempotentHint" => {
-                                        annotations.idempotent_hint = Some(lit_bool.value)
+                                        metadata.idempotent_hint = Some(lit_bool.value)
                                     }
                                     "open_world_hint" | "openWorldHint" => {
-                                        annotations.open_world_hint = Some(lit_bool.value)
+                                        metadata.open_world_hint = Some(lit_bool.value)
                                     }
                                     _ => {
                                         return Err(syn::Error::new_spanned(
                                             nv.path,
                                             format!("Unknown boolean annotation: {}", key),
-                                        ));
+                                        ))
                                     }
                                 }
                             } else {
@@ -221,29 +239,22 @@ impl Parse for ToolArgs {
                     return Err(syn::Error::new_spanned(
                         meta,
                         "Expected name-value pair or list",
-                    ));
+                    ))
                 }
             }
         }
 
-        Ok(ToolArgs {
+        Ok(ToolAttributes {
             name,
             description,
             context_arg,
-            annotations,
+            metadata,
         })
     }
 }
 
-fn extract_input(
-    input_fn: &ItemFn,
-    context_arg: bool,
-) -> (
-    Option<Box<Type>>,
-    Option<Box<Type>>,
-    Option<Box<Pat>>,
-    Option<Box<Pat>>,
-) {
+/// Extracts input parameters (context and arguments) from the function signature.
+fn extract_input(input_fn: &ItemFn, context_arg: bool) -> (FunctionParameter, FunctionParameter) {
     let inputs = &input_fn.sig.inputs;
     let (context, args, ctx_ident, args_ident) = match inputs.len() {
         0 => (None, None, None, None),
@@ -287,57 +298,85 @@ fn extract_input(
         _ => panic!("mcp_tool expects 0-2 arguments (context and/or args)"),
     };
 
-    // Debug: Ensure context is detected correctly
-    assert!(
-        (context.is_some() && ctx_ident.is_some()) || (context.is_none() && ctx_ident.is_none()),
-        "Context and ctx_ident mismatch: context={:?}, ctx_ident={:?}",
-        context.is_some(),
-        ctx_ident.is_some()
-    );
+    let args_ty = args.unwrap_or_else(|| parse_quote! { () });
+    let ctx_ty = context.unwrap_or_else(|| parse_quote! { () });
 
-    (context, args, ctx_ident, args_ident)
+    (
+        FunctionParameter {
+            ident: ctx_ident,
+            ty: *ctx_ty,
+        },
+        FunctionParameter {
+            ident: args_ident,
+            ty: *args_ty,
+        },
+    )
 }
 
-fn extract_return_type(input_fn: &ItemFn) -> Type {
-    // Extract return type
-    let return_ty = match &input_fn.sig.output {
-        ReturnType::Type(_, ty) => {
-            if let Type::Path(type_path) = &**ty {
-                if let Some(result) = type_path.path.segments.last() {
-                    if result.ident == "Result" {
-                        if let syn::PathArguments::AngleBracketed(args) = &result.arguments {
-                            if args.args.len() >= 1 {
-                                if let Some(syn::GenericArgument::Type(inner_ty)) =
-                                    args.args.first()
-                                {
-                                    inner_ty.clone()
-                                } else {
-                                    panic!("Expected Result<T> with type argument");
-                                }
-                            } else {
-                                panic!("Expected Result<T> with type argument");
+/// Generates the call logic based on the presence of context and arguments.
+fn generate_call_logic(
+    ctx_parameter: &FunctionParameter,
+    args_parameter: &FunctionParameter,
+    fn_name: &Ident,
+) -> TokenStream {
+    match (ctx_parameter.has_value(), args_parameter.has_value()) {
+        (true, true) => {
+            let ctx_ident = ctx_parameter.get_ident();
+            let args_ident = args_parameter.get_ident();
+            let args_ty = &args_parameter.ty;
+            quote! {
+                let #args_ident: #args_ty = match serde_json::from_value(params) {
+                    Ok(p) => p,
+                    Err(e) => return mcp_core::types::CallToolResponse {
+                        content: vec![mcp_core::types::ToolResponseContent::Text(
+                            mcp_core::types::TextContent {
+                                content_type: "text".to_string(),
+                                text: format!("Invalid parameters: {}", e),
+                                annotations: None,
                             }
-                        } else {
-                            panic!("Expected Result<T> with type argument");
-                        }
-                    } else {
-                        panic!("Expected Result return type");
-                    }
-                } else {
-                    panic!("Expected Result return type");
-                }
-            } else {
-                panic!("Expected Result return type");
+                        )],
+                        is_error: Some(true),
+                        meta: req.meta,
+                    },
+                };
+                #fn_name(#ctx_ident, #args_ident).await
             }
         }
-        _ => panic!("rig_tool function must return Result"),
-    };
-
-    return_ty
+        (true, false) => {
+            let ctx_ident = ctx_parameter.get_ident();
+            quote! {
+                #fn_name(#ctx_ident).await
+            }
+        }
+        (false, true) => {
+            let args_ident = args_parameter.get_ident();
+            let args_ty = &args_parameter.ty;
+            quote! {
+                let #args_ident: #args_ty = match serde_json::from_value(params) {
+                    Ok(p) => p,
+                    Err(e) => return mcp_core::types::CallToolResponse {
+                        content: vec![mcp_core::types::ToolResponseContent::Text(
+                            mcp_core::types::TextContent {
+                                content_type: "text".to_string(),
+                                text: format!("Invalid parameters: {}", e),
+                                annotations: None,
+                            }
+                        )],
+                        is_error: Some(true),
+                        meta: req.meta,
+                    },
+                };
+                #fn_name(#args_ident).await
+            }
+        }
+        (false, false) => quote! {
+            #fn_name().await
+        },
+    }
 }
 
 pub fn mcp_tool(args: TokenStream, input_fn: TokenStream) -> TokenStream {
-    let args = match syn::parse2::<ToolArgs>(args) {
+    let attrs = match syn::parse2::<ToolAttributes>(args) {
         Ok(args) => args,
         Err(e) => return e.to_compile_error().into(),
     };
@@ -350,107 +389,23 @@ pub fn mcp_tool(args: TokenStream, input_fn: TokenStream) -> TokenStream {
     let fn_name = &input_fn.sig.ident;
     let fn_name_str = fn_name.to_string();
     let struct_name = format_ident!("{}Mcp", fn_name_str.to_case(Case::Pascal));
-    let tool_name = args.name.unwrap_or(fn_name_str.clone());
-    let tool_description = args.description.unwrap_or_default();
-    let context_arg = args.context_arg;
+    let tool_name = attrs.name.unwrap_or(fn_name_str.clone());
+    let tool_description = attrs.description.unwrap_or_default();
+    let context_arg = attrs.context_arg;
 
-    // Tool annotations
-    let title = args.annotations.title.unwrap_or(fn_name_str.clone());
-    let read_only_hint = args.annotations.read_only_hint.unwrap_or(false);
-    let destructive_hint = args.annotations.destructive_hint.unwrap_or(true);
-    let idempotent_hint = args.annotations.idempotent_hint.unwrap_or(false);
-    let open_world_hint = args.annotations.open_world_hint.unwrap_or(true);
+    let title = attrs.metadata.title.unwrap_or(fn_name_str.clone());
+    let read_only_hint = attrs.metadata.read_only_hint.unwrap_or(false);
+    let destructive_hint = attrs.metadata.destructive_hint.unwrap_or(true);
+    let idempotent_hint = attrs.metadata.idempotent_hint.unwrap_or(false);
+    let open_world_hint = attrs.metadata.open_world_hint.unwrap_or(true);
 
-    let (context, args, ctx_ident, args_ident) = extract_input(&input_fn, context_arg);
+    let (ctx_parameter, args_parameter) = extract_input(&input_fn, context_arg);
 
-    let args_ty = args
-        .as_ref()
-        .map_or_else(|| parse_quote! { () }, |ty| *ty.clone());
-    let ctx_ty = context
-        .as_ref()
-        .map_or_else(|| parse_quote! { () }, |ty| *ty.clone());
+    let (call_signature, ctx_clone) = ctx_parameter.get_call_signature();
+    let call_body = generate_call_logic(&ctx_parameter, &args_parameter, fn_name);
 
-    let return_type = extract_return_type(&input_fn);
-
-    // Generate parameters struct for schema if args_ty is not ()
-    let params_struct_name = format_ident!("{}Parameters", struct_name);
-    let params_struct_def = if args_ty != parse_quote! { () } {
-        quote! {
-            #[derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema, Default)]
-            pub struct #params_struct_name {
-                #args_ident: #args_ty
-            }
-        }
-    } else {
-        quote! {}
-    };
-
-    let (call_signature, ctx_clone) = match context.is_some() {
-        true => (
-            quote! {#ctx_ident: #ctx_ty},
-            quote! {let #ctx_ident = #ctx_ident.clone();},
-        ),
-        false => (quote! {}, quote! {}),
-    };
-
-    // Generate call invocation based on parameters
-    let call_args = match (ctx_ident.is_some(), args_ident.is_some()) {
-        (true, true) => {
-            let ctx_ident = ctx_ident.as_ref().unwrap();
-            let args_ident = args_ident.as_ref().unwrap();
-            quote! {
-                let params: #params_struct_name = match serde_json::from_value(params) {
-                    Ok(p) => p,
-                    Err(e) => return mcp_core::types::CallToolResponse {
-                        content: vec![mcp_core::types::ToolResponseContent::Text(
-                            mcp_core::types::TextContent {
-                                content_type: "text".to_string(),
-                                text: format!("Invalid parameters: {}", e),
-                                annotations: None,
-                            }
-                        )],
-                        is_error: Some(true),
-                        meta: req.meta,
-                    },
-                };
-                #fn_name(#ctx_ident, params.#args_ident).await
-            }
-        }
-        (true, false) => {
-            let ctx_ident = ctx_ident.as_ref().unwrap();
-            quote! {
-                #fn_name(#ctx_ident).await
-            }
-        }
-        (false, true) => {
-            let args_ident = args_ident.as_ref().unwrap();
-            quote! {
-                let params: #params_struct_name = match serde_json::from_value(params) {
-                    Ok(p) => p,
-                    Err(e) => return mcp_core::types::CallToolResponse {
-                        content: vec![mcp_core::types::ToolResponseContent::Text(
-                            mcp_core::types::TextContent {
-                                content_type: "text".to_string(),
-                                text: format!("Invalid parameters: {}", e),
-                                annotations: None,
-                            }
-                        )],
-                        is_error: Some(true),
-                        meta: req.meta,
-                    },
-                };
-                #fn_name(params.#args_ident).await
-            }
-        }
-        (false, false) => quote! {
-            #fn_name().await
-        },
-    };
-
+    let args_ty = &args_parameter.ty;
     let expanded = quote! {
-
-        #params_struct_def
-
         #input_fn
 
         #[derive(Default)]
@@ -468,7 +423,7 @@ pub fn mcp_tool(args: TokenStream, input_fn: TokenStream) -> TokenStream {
                     "openWorldHint": #open_world_hint
                 });
 
-                 mcp_core::types::Tool {
+                mcp_core::types::Tool {
                     name: #tool_name.to_string(),
                     description: Some(#tool_description.to_string()),
                     input_schema: schema,
@@ -483,25 +438,20 @@ pub fn mcp_tool(args: TokenStream, input_fn: TokenStream) -> TokenStream {
             }
 
             pub fn call(#call_signature) -> mcp_core::tools::ToolHandlerFn {
-                #ctx_clone
-                move |req: mcp_core::types::CallToolRequest| {
+                Box::new(move |req: mcp_core::types::CallToolRequest| {
+                    #ctx_clone
                     Box::pin(async move {
                         let params = match req.arguments {
                             Some(args) => serde_json::to_value(args).unwrap_or_default(),
                             None => serde_json::Value::Null,
                         };
 
-                        let call_response =
-                            yart::wrap_unsafe(move || async move {
-                                #call_args
-                                .map_err(|e| anyhow::anyhow!(e.to_string()))
-                            }).await?;
+                        let call_response = { #call_body };
 
-                       let call_tool_response  = match call_response {
-                            Ok::<#return_type, _>(response) => {
-                                let content = vec![response.into()];
+                        let call_tool_response = match call_response {
+                            Ok(response) => {
                                 mcp_core::types::CallToolResponse {
-                                    content,
+                                    content: response.into(),
                                     is_error: Some(false),
                                     meta: req.meta,
                                 }
@@ -518,396 +468,167 @@ pub fn mcp_tool(args: TokenStream, input_fn: TokenStream) -> TokenStream {
                                 meta: req.meta,
                             },
                         };
-                        call_tool_response;
-
-                    mcp_core::types::CallToolResponse {
-                        content: vec![mcp_core::types::ToolResponseContent::Text(
-                            mcp_core::types::TextContent {
-                                content_type: "text".to_string(),
-                                text: format!("Tool execution error: "),
-                                annotations: None,
-                            }
-                        )],
-                        is_error: Some(true),
-                        meta: req.meta,
-                    }
+                        call_tool_response
                     })
-                }
+                })
             }
         }
     };
 
     expanded.into()
-
-    // let debug_msg = format!(
-    //     "Context and ctx_ident mismatch: context={:?}, ctx_ident={:?}",
-    //     ctx_ty.to_token_stream().to_string(),
-    //     args_ty.to_token_stream().to_string(),
-    // );
-
-    // quote! {
-    //     compile_error!(#debug_msg)
-    // }
-    // .into()
 }
 
 #[cfg(test)]
-mod test_mcp_macro {
+mod tests {
     use anyhow::Result;
     use proc_macro2::TokenStream;
     use quote::ToTokens;
-    use syn::{parse_quote, Attribute};
+    use syn::{parse_quote, Attribute, ItemFn};
 
-    use crate::mcp_macro::{extract_input, extract_return_type};
-
-    use super::{mcp_tool, ToolArgs};
+    use super::{mcp_tool, ToolAttributes};
 
     fn get_inner_token_stream(attr: Attribute) -> Result<TokenStream> {
         let args_ts = match attr.meta {
             syn::Meta::List(syn::MetaList { tokens, .. }) => Ok(tokens),
             _ => Err(syn::Error::new_spanned(attr.meta, "Expected mcp_tool(...)")),
-        }
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
-
+        }?;
         Ok(args_ts)
     }
 
     #[test]
-    fn gen_code() -> Result<()> {
-        // Parse attribute and extract inner mcp_tool(...) TokenStream
-        let attr: syn::Attribute =
-            parse_quote! { #[mcp_tool(description = "TEST_XX", context_arg = true)] };
-        let args_ts = match attr.meta {
-            syn::Meta::List(syn::MetaList { tokens, .. }) => Ok(tokens),
-            _ => Err(syn::Error::new_spanned(attr.meta, "Expected mcp_tool(...)")),
-        }
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
-
-        let input_fn: syn::ItemFn =
-            parse_quote! { async fn test_tool(args: MyArgs) -> Result<()> { Ok(()) } };
-
-        // Convert proc_macro2::TokenStream to proc_macro::TokenStream
+    fn gen_code_with_context_and_args() -> Result<()> {
+        let attr =
+            parse_quote! { #[mcp_tool(description = "With context and args", context_arg = true)] };
+        let args_ts = get_inner_token_stream(attr)?;
+        let input_fn: ItemFn = parse_quote! { async fn test_tool(ctx: Arc<MyContext>, args: MyArgs) -> Result<MyResponse> { Ok(MyResponse) } };
         let ret = mcp_tool(args_ts.to_token_stream(), input_fn.to_token_stream());
-
-        println!("{}", ret);
-
+        let ret_str = ret.to_string();
+        assert!(ret_str.contains("pub struct TestToolMcp"));
+        assert!(ret_str.contains("pub fn tool ("));
+        assert!(ret_str.contains("pub fn call (ctx : Arc < MyContext >)"));
         Ok(())
     }
 
     #[test]
-    fn argument_description() -> Result<()> {
+    fn gen_code_with_context_only() -> Result<()> {
+        let attr =
+            parse_quote! { #[mcp_tool(description = "With context only", context_arg = true)] };
+        let args_ts = get_inner_token_stream(attr)?;
+        let input_fn: ItemFn = parse_quote! { async fn test_tool(ctx: Arc<MyContext>) -> Result<MyResponse> { Ok(MyResponse) } };
+        let ret = mcp_tool(args_ts.to_token_stream(), input_fn.to_token_stream());
+        let ret_str = ret.to_string();
+        assert!(ret_str.contains("pub struct TestToolMcp"));
+        assert!(ret_str.contains("pub fn tool ("));
+        assert!(ret_str.contains("pub fn call (ctx : Arc < MyContext >)"));
+        Ok(())
+    }
+
+    #[test]
+    fn gen_code_with_args_only() -> Result<()> {
+        let attr = parse_quote! { #[mcp_tool(description = "With args only")] };
+        let args_ts = get_inner_token_stream(attr)?;
+        let input_fn: ItemFn = parse_quote! { async fn test_tool(args: MyArgs) -> Result<MyResponse> { Ok(MyResponse) } };
+        let ret = mcp_tool(args_ts.to_token_stream(), input_fn.to_token_stream());
+        let ret_str = ret.to_string();
+        assert!(ret_str.contains("pub struct TestToolMcp"));
+        assert!(ret_str.contains("pub fn tool ("));
+        assert!(ret_str.contains("pub fn call ()"));
+        Ok(())
+    }
+
+    #[test]
+    fn gen_code_with_no_args() -> Result<()> {
+        let attr = parse_quote! { #[mcp_tool(description = "No args")] };
+        let args_ts = get_inner_token_stream(attr)?;
+        let input_fn: ItemFn =
+            parse_quote! { async fn test_tool() -> Result<MyResponse> { Ok(MyResponse) } };
+        let ret = mcp_tool(args_ts.to_token_stream(), input_fn.to_token_stream());
+        let ret_str = ret.to_string();
+        assert!(ret_str.contains("pub struct TestToolMcp"));
+        assert!(ret_str.contains("pub fn tool ("));
+        assert!(ret_str.contains("pub fn call ()"));
+        Ok(())
+    }
+
+    #[test]
+    fn gen_code_handles_deserialization_error() -> Result<()> {
+        let attr = parse_quote! { #[mcp_tool(description = "Test deserialization error")] };
+        let args_ts = get_inner_token_stream(attr)?;
+        let input_fn: ItemFn = parse_quote! { async fn test_tool(args: MyArgs) -> Result<MyResponse> { Ok(MyResponse) } };
+        let ret = mcp_tool(args_ts.to_token_stream(), input_fn.to_token_stream());
+        let ret_str = ret.to_string();
+        assert!(ret_str.contains("match serde_json :: from_value (params)"));
+        assert!(ret_str.contains("Invalid parameters"));
+        assert!(ret_str.contains("is_error : Some (true)"));
+        Ok(())
+    }
+
+    #[test]
+    fn parse_description() -> Result<()> {
         let args = get_inner_token_stream(parse_quote! { #[mcp_tool(description = "TEST_XX")] })?;
-
-        let args = match syn::parse2::<ToolArgs>(args.into()) {
-            Ok(args) => args,
-            Err(e) => return Err(anyhow::anyhow!("parse error: {}", e)),
-        };
-
-        assert_eq!(args.name, None);
-        assert_eq!(args.description, Some("TEST_XX".to_string()));
-        assert_eq!(args.context_arg, false);
-        assert_eq!(args.annotations.title, None);
-        assert_eq!(args.annotations.read_only_hint, None);
-        assert_eq!(args.annotations.destructive_hint, None);
-        assert_eq!(args.annotations.idempotent_hint, None);
-        assert_eq!(args.annotations.open_world_hint, None);
-
+        let attrs = syn::parse2::<ToolAttributes>(args.into())?;
+        assert_eq!(attrs.name, None);
+        assert_eq!(attrs.description, Some("TEST_XX".to_string()));
+        assert_eq!(attrs.context_arg, false);
+        assert_eq!(attrs.metadata.title, None);
         Ok(())
     }
 
     #[test]
-    fn argument_name() -> Result<()> {
+    fn parse_name() -> Result<()> {
         let args = get_inner_token_stream(parse_quote! { #[mcp_tool(name = "TEST_XX")] })?;
-
-        let args = match syn::parse2::<ToolArgs>(args.into()) {
-            Ok(args) => args,
-            Err(e) => return Err(anyhow::anyhow!("parse error: {}", e)),
-        };
-
-        assert_eq!(args.name, Some("TEST_XX".to_string()));
-        assert_eq!(args.description, None);
-        assert_eq!(args.context_arg, false);
-        assert_eq!(args.annotations.title, None);
-        assert_eq!(args.annotations.read_only_hint, None);
-        assert_eq!(args.annotations.destructive_hint, None);
-        assert_eq!(args.annotations.idempotent_hint, None);
-        assert_eq!(args.annotations.open_world_hint, None);
-
+        let attrs = syn::parse2::<ToolAttributes>(args.into())?;
+        assert_eq!(attrs.name, Some("TEST_XX".to_string()));
+        assert_eq!(attrs.description, None);
+        assert_eq!(attrs.context_arg, false);
+        assert_eq!(attrs.metadata.title, None);
         Ok(())
     }
 
     #[test]
-    fn argument_context_arg() -> Result<()> {
+    fn parse_context_arg() -> Result<()> {
         let args = get_inner_token_stream(parse_quote! { #[mcp_tool(context_arg = true)] })?;
-
-        let args = match syn::parse2::<ToolArgs>(args.into()) {
-            Ok(args) => args,
-            Err(e) => return Err(anyhow::anyhow!("parse error: {}", e)),
-        };
-
-        assert_eq!(args.name, None);
-        assert_eq!(args.description, None);
-        assert_eq!(args.context_arg, true);
-        assert_eq!(args.annotations.title, None);
-        assert_eq!(args.annotations.read_only_hint, None);
-        assert_eq!(args.annotations.destructive_hint, None);
-        assert_eq!(args.annotations.idempotent_hint, None);
-        assert_eq!(args.annotations.open_world_hint, None);
-
+        let attrs = syn::parse2::<ToolAttributes>(args.into())?;
+        assert_eq!(attrs.context_arg, true);
+        assert_eq!(attrs.name, None);
+        assert_eq!(attrs.description, None);
+        assert_eq!(attrs.metadata.title, None);
         Ok(())
     }
 
     #[test]
-    fn argument_read_only_hint() -> Result<()> {
-        let args = get_inner_token_stream(parse_quote! { #[mcp_tool(read_only_hint = true)] })?;
-
-        let args = match syn::parse2::<ToolArgs>(args.into()) {
-            Ok(args) => args,
-            Err(e) => return Err(anyhow::anyhow!("parse error: {}", e)),
-        };
-
-        assert_eq!(args.name, None);
-        assert_eq!(args.description, None);
-        assert_eq!(args.context_arg, false);
-        assert_eq!(args.annotations.title, None);
-        assert_eq!(args.annotations.read_only_hint, Some(true));
-        assert_eq!(args.annotations.destructive_hint, None);
-        assert_eq!(args.annotations.idempotent_hint, None);
-        assert_eq!(args.annotations.open_world_hint, None);
-
-        Ok(())
-    }
-
-    #[test]
-    fn argument_destructive_hint() -> Result<()> {
-        let args = get_inner_token_stream(parse_quote! { #[mcp_tool(destructive_hint = true)] })?;
-
-        let args = match syn::parse2::<ToolArgs>(args.into()) {
-            Ok(args) => args,
-            Err(e) => return Err(anyhow::anyhow!("parse error: {}", e)),
-        };
-
-        assert_eq!(args.name, None);
-        assert_eq!(args.description, None);
-        assert_eq!(args.context_arg, false);
-        assert_eq!(args.annotations.title, None);
-        assert_eq!(args.annotations.read_only_hint, None);
-        assert_eq!(args.annotations.destructive_hint, Some(true));
-        assert_eq!(args.annotations.idempotent_hint, None);
-        assert_eq!(args.annotations.open_world_hint, None);
-
-        Ok(())
-    }
-
-    #[test]
-    fn argument_idempotent_hint() -> Result<()> {
-        let args = get_inner_token_stream(parse_quote! { #[mcp_tool(idempotent_hint = true)] })?;
-
-        let args = match syn::parse2::<ToolArgs>(args.into()) {
-            Ok(args) => args,
-            Err(e) => return Err(anyhow::anyhow!("parse error: {}", e)),
-        };
-
-        assert_eq!(args.name, None);
-        assert_eq!(args.description, None);
-        assert_eq!(args.context_arg, false);
-        assert_eq!(args.annotations.title, None);
-        assert_eq!(args.annotations.read_only_hint, None);
-        assert_eq!(args.annotations.destructive_hint, None);
-        assert_eq!(args.annotations.idempotent_hint, Some(true));
-        assert_eq!(args.annotations.open_world_hint, None);
-
-        Ok(())
-    }
-
-    #[test]
-    fn argument_open_world_hint() -> Result<()> {
-        let args = get_inner_token_stream(parse_quote! { #[mcp_tool(open_world_hint = true)] })?;
-
-        let args = match syn::parse2::<ToolArgs>(args.into()) {
-            Ok(args) => args,
-            Err(e) => return Err(anyhow::anyhow!("parse error: {}", e)),
-        };
-
-        assert_eq!(args.name, None);
-        assert_eq!(args.description, None);
-        assert_eq!(args.context_arg, false);
-        assert_eq!(args.annotations.title, None);
-        assert_eq!(args.annotations.read_only_hint, None);
-        assert_eq!(args.annotations.destructive_hint, None);
-        assert_eq!(args.annotations.idempotent_hint, None);
-        assert_eq!(args.annotations.open_world_hint, Some(true));
-
-        Ok(())
-    }
-
-    #[test]
-    fn argument_annotations_title() -> Result<()> {
-        let args =
-            get_inner_token_stream(parse_quote! { #[mcp_tool(annotations(title = "_title"))] })?;
-
-        let args = match syn::parse2::<ToolArgs>(args.into()) {
-            Ok(args) => args,
-            Err(e) => return Err(anyhow::anyhow!("parse error: {}", e)),
-        };
-
-        assert_eq!(args.name, None);
-        assert_eq!(args.description, None);
-        assert_eq!(args.context_arg, false);
-        assert_eq!(args.annotations.title, Some("_title".to_string()));
-        assert_eq!(args.annotations.read_only_hint, None);
-        assert_eq!(args.annotations.destructive_hint, None);
-        assert_eq!(args.annotations.idempotent_hint, None);
-        assert_eq!(args.annotations.open_world_hint, None);
-
-        Ok(())
-    }
-
-    #[test]
-    fn argument_annotations() -> Result<()> {
+    fn parse_metadata() -> Result<()> {
         let args = get_inner_token_stream(
-            parse_quote! { #[mcp_tool(annotations(title = "_title", read_only_hint=true,  destructive_hint=true,  idempotent_hint=true,  open_world_hint=true, ))] },
+            parse_quote! { #[mcp_tool(annotations(title = "MyTool", read_only_hint = true, destructive_hint = false))] },
         )?;
-
-        let args = match syn::parse2::<ToolArgs>(args.into()) {
-            Ok(args) => args,
-            Err(e) => return Err(anyhow::anyhow!("parse error: {}", e)),
-        };
-
-        assert_eq!(args.name, None);
-        assert_eq!(args.description, None);
-        assert_eq!(args.context_arg, false);
-        assert_eq!(args.annotations.title, Some("_title".to_string()));
-        assert_eq!(args.annotations.read_only_hint, Some(true));
-        assert_eq!(args.annotations.destructive_hint, Some(true));
-        assert_eq!(args.annotations.idempotent_hint, Some(true));
-        assert_eq!(args.annotations.open_world_hint, Some(true));
-
+        let attrs = syn::parse2::<ToolAttributes>(args.into())?;
+        assert_eq!(attrs.metadata.title, Some("MyTool".to_string()));
+        assert_eq!(attrs.metadata.read_only_hint, Some(true));
+        assert_eq!(attrs.metadata.destructive_hint, Some(false));
+        assert_eq!(attrs.metadata.idempotent_hint, None);
+        assert_eq!(attrs.metadata.open_world_hint, None);
         Ok(())
     }
 
     #[test]
-    fn extract_input_context_and_args() -> Result<()> {
-        let input_fn: syn::ItemFn = parse_quote! { async fn test_tool(ctx:Arc<String>,args: MyArgs) -> Result<()> { Ok(()) } };
-
-        // Convert proc_macro2::TokenStream to proc_macro::TokenStream
-        let (context, args, ctx_ident, args_ident) = extract_input(&input_fn, false);
-
-        assert_eq!(context.is_some(), true);
-        assert_eq!(
-            *(context.unwrap()).into_token_stream().to_string(),
-            "Arc < String >".to_string()
-        );
-        assert_eq!(args.is_some(), true);
-        assert_eq!(
-            *(args.unwrap()).into_token_stream().to_string(),
-            "MyArgs".to_string()
-        );
-        assert_eq!(ctx_ident.is_some(), true);
-        assert_eq!(
-            *(ctx_ident.unwrap()).into_token_stream().to_string(),
-            "ctx".to_string()
-        );
-        assert_eq!(args_ident.is_some(), true);
-        assert_eq!(
-            *(args_ident.unwrap()).into_token_stream().to_string(),
-            "args".to_string()
-        );
-
-        Ok(())
+    fn parse_invalid_attribute_value() {
+        let attr = parse_quote! { #[mcp_tool(description = 123)] };
+        let args_ts = get_inner_token_stream(attr).unwrap();
+        let result = syn::parse2::<ToolAttributes>(args_ts.into());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Expected string literal"));
     }
 
     #[test]
-    fn extract_input_context() -> Result<()> {
-        let input_fn: syn::ItemFn =
-            parse_quote! { async fn test_tool(ctx:Arc<String>) -> Result<()> { Ok(()) } };
-
-        // Convert proc_macro2::TokenStream to proc_macro::TokenStream
-        let (context, args, ctx_ident, args_ident) = extract_input(&input_fn, true);
-
-        assert_eq!(context.is_some(), true);
-        assert_eq!(
-            *(context.unwrap()).into_token_stream().to_string(),
-            "Arc < String >".to_string()
-        );
-        assert_eq!(args.is_some(), false);
-        assert_eq!(ctx_ident.is_some(), true);
-        assert_eq!(
-            *(ctx_ident.unwrap()).into_token_stream().to_string(),
-            "ctx".to_string()
-        );
-        assert_eq!(args_ident.is_some(), false);
-
-        Ok(())
-    }
-
-    #[test]
-    fn extract_input_args() -> Result<()> {
-        let input_fn: syn::ItemFn =
-            parse_quote! { async fn test_tool(args: MyArgs) -> Result<()> { Ok(()) } };
-
-        // Convert proc_macro2::TokenStream to proc_macro::TokenStream
-        let (context, args, ctx_ident, args_ident) = extract_input(&input_fn, false);
-
-        assert_eq!(context.is_some(), false);
-        assert_eq!(args.is_some(), true);
-        assert_eq!(
-            *(args.unwrap()).into_token_stream().to_string(),
-            "MyArgs".to_string()
-        );
-        assert_eq!(ctx_ident.is_some(), false);
-        assert_eq!(args_ident.is_some(), true);
-        assert_eq!(
-            *(args_ident.unwrap()).into_token_stream().to_string(),
-            "args".to_string()
-        );
-
-        Ok(())
-    }
-
-    #[test]
-    fn extract_input_no_input() -> Result<()> {
-        let input_fn: syn::ItemFn = parse_quote! { async fn test_tool() -> Result<()> { Ok(()) } };
-
-        // Convert proc_macro2::TokenStream to proc_macro::TokenStream
-        let (context, args, ctx_ident, args_ident) = extract_input(&input_fn, false);
-
-        assert_eq!(context.is_some(), false);
-        assert_eq!(args.is_some(), false);
-        assert_eq!(ctx_ident.is_some(), false);
-        assert_eq!(args_ident.is_some(), false);
-
-        Ok(())
-    }
-
-    #[test]
-    fn extract_return_type_blanket() -> Result<()> {
-        let input_fn: syn::ItemFn = parse_quote! { async fn test_tool() -> Result<()> { Ok(()) } };
-
-        // Convert proc_macro2::TokenStream to proc_macro::TokenStream
-        let return_type = extract_return_type(&input_fn);
-
-        assert_eq!(
-            return_type.into_token_stream().to_string(),
-            "()".to_string()
-        );
-
-        Ok(())
-    }
-
-    #[test]
-    fn extract_return_type_named() -> Result<()> {
-        let input_fn: syn::ItemFn =
-            parse_quote! { async fn test_tool() -> Result<Response> { Ok(()) } };
-
-        // Convert proc_macro2::TokenStream to proc_macro::TokenStream
-        let return_type = extract_return_type(&input_fn);
-
-        assert_eq!(
-            return_type.into_token_stream().to_string(),
-            "Response".to_string()
-        );
-
-        Ok(())
+    #[should_panic(expected = "mcp_tool expects 0-2 arguments")]
+    fn gen_code_invalid_signature() {
+        let attr = parse_quote! { #[mcp_tool(description = "Invalid signature")] };
+        let args_ts = get_inner_token_stream(attr).unwrap();
+        let input_fn: ItemFn =
+            parse_quote! { async fn test_tool(a: A, b: B, c: C) -> Result<()> { Ok(()) } };
+        mcp_tool(args_ts.to_token_stream(), input_fn.to_token_stream());
     }
 }
