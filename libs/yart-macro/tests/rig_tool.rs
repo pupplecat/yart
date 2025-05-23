@@ -1,10 +1,10 @@
+use anyhow::Result;
 use rig::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use yart::ToolError;
-
 // Mock context and types
 #[derive(Clone)]
 pub struct TestContext {
@@ -26,7 +26,7 @@ pub struct TestOutput {
     name = "test_tool",
     description = "A test tool that echoes input with context"
 )]
-async fn test_tool(ctx: Arc<TestContext>, args: TestArgs) -> anyhow::Result<TestOutput, ToolError> {
+async fn test_tool(ctx: Arc<TestContext>, args: TestArgs) -> Result<TestOutput> {
     if args.input.is_empty() {
         return Err(ToolError::new("Input cannot be empty"));
     }

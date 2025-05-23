@@ -146,16 +146,10 @@ pub fn rig_tool(attr: TokenStream, item: TokenStream) -> TokenStream {
                 if let Some(result) = type_path.path.segments.last() {
                     if result.ident == "Result" {
                         if let syn::PathArguments::AngleBracketed(args) = &result.arguments {
-                            if args.args.len() == 2 {
-                                if let Some(syn::GenericArgument::Type(inner_ty)) =
-                                    args.args.first()
-                                {
-                                    inner_ty.clone()
-                                } else {
-                                    panic!("Expected Result<T, E> with type argument");
-                                }
+                            if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
+                                inner_ty.clone()
                             } else {
-                                panic!("Expected Result<T, E> with two type arguments");
+                                panic!("Expected Result<T, E> with type argument");
                             }
                         } else {
                             panic!("Expected Result<T, E> with type arguments");
